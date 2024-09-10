@@ -1,19 +1,20 @@
 #![allow(dead_code)]
 
-extern crate alloc;
-
-use alloc::string::String;
-use alloc::vec::Vec;
 use serde::Deserialize;
 
 #[derive(Deserialize)]
 pub struct Input<'a> {
     blob: &'a str,
+    z: &'a str,
 }
 
 impl Input<'_> {
-    pub fn get_blob_bytes(&self) -> Result<Vec<u8>, String> {
-        hex::decode(&self.blob[2..]).map_err(|_| "Invalid blob".to_string())
+    pub fn get_blob_bytes(&self) -> Vec<u8> {
+        hex::decode(&self.blob[2..]).unwrap()
+    }
+
+    pub fn get_z_bytes(&self) -> Vec<u8> {
+        hex::decode(&self.z[2..]).unwrap()
     }
 }
 
@@ -21,22 +22,16 @@ impl Input<'_> {
 pub struct Test<'a> {
     #[serde(borrow)]
     pub input: Input<'a>,
-    output: Option<(Vec<String>, Vec<String>)>,
+    #[serde(borrow)]
+    output: Option<(&'a str, &'a str)>,
 }
 
 impl Test<'_> {
-    #[allow(clippy::type_complexity)]
-    pub fn get_output(&self) -> Option<(Vec<Vec<u8>>, Vec<Vec<u8>>)> {
-        self.output.clone().map(|(cells, proofs)| {
+    pub fn get_output_bytes(&self) -> Option<(Vec<u8>, Vec<u8>)> {
+        self.output.map(|(proof, y)| {
             (
-                cells
-                    .iter()
-                    .map(|s| hex::decode(&s[2..]).unwrap())
-                    .collect::<Vec<_>>(),
-                proofs
-                    .iter()
-                    .map(|s| hex::decode(&s[2..]).unwrap())
-                    .collect::<Vec<Vec<u8>>>(),
+                hex::decode(&proof[2..]).unwrap(),
+                hex::decode(&y[2..]).unwrap(),
             )
         })
     }
