@@ -305,80 +305,34 @@ pub unsafe extern "C" fn free_trusted_setup(s: *mut CKZGSettings) {
     PRECOMPUTATION_TABLES.remove_precomputation(&*s);
 
     if !(*s).roots_of_unity.is_null() {
-        let v = Box::from_raw(core::slice::from_raw_parts_mut(
+        let max_width = (*s).max_width as usize;
+        let roots = Box::from_raw(core::slice::from_raw_parts_mut(
             (*s).roots_of_unity,
-            FIELD_ELEMENTS_PER_EXT_BLOB + 1,
+            max_width,
         ));
-        drop(v);
-        (*s).roots_of_unity = ptr::null_mut();
+        drop(roots);
+        (*s).roots_of_unity = null_mut();
     }
 
-    if !(*s).brp_roots_of_unity.is_null() {
-        let v = Box::from_raw(core::slice::from_raw_parts_mut(
-            (*s).brp_roots_of_unity,
-            FIELD_ELEMENTS_PER_EXT_BLOB,
+    if !(*s).g1_values.is_null() {
+        let g1 = Box::from_raw(core::slice::from_raw_parts_mut(
+            (*s).g1_values,
+            TRUSTED_SETUP_NUM_G1_POINTS,
         ));
-        drop(v);
-        (*s).brp_roots_of_unity = ptr::null_mut();
+        drop(g1);
+        (*s).g1_values = null_mut();
     }
 
-    if !(*s).reverse_roots_of_unity.is_null() {
-        let v = Box::from_raw(core::slice::from_raw_parts_mut(
-            (*s).reverse_roots_of_unity,
-            FIELD_ELEMENTS_PER_EXT_BLOB + 1,
-        ));
-        drop(v);
-        (*s).reverse_roots_of_unity = ptr::null_mut();
-    }
-
-    if !(*s).g1_values_monomial.is_null() {
-        let v = Box::from_raw(core::slice::from_raw_parts_mut(
-            (*s).g1_values_monomial,
-            FIELD_ELEMENTS_PER_BLOB,
-        ));
-        drop(v);
-        (*s).g1_values_monomial = ptr::null_mut();
-    }
-
-    if !(*s).g1_values_lagrange_brp.is_null() {
-        let v = Box::from_raw(core::slice::from_raw_parts_mut(
-            (*s).g1_values_lagrange_brp,
-            FIELD_ELEMENTS_PER_BLOB,
-        ));
-        drop(v);
-        (*s).g1_values_lagrange_brp = ptr::null_mut();
-    }
-
-    if !(*s).g2_values_monomial.is_null() {
-        let v = Box::from_raw(core::slice::from_raw_parts_mut(
-            (*s).g2_values_monomial,
+    if !(*s).g2_values.is_null() {
+        let g2 = Box::from_raw(core::slice::from_raw_parts_mut(
+            (*s).g2_values,
             TRUSTED_SETUP_NUM_G2_POINTS,
         ));
-        drop(v);
-        (*s).g2_values_monomial = ptr::null_mut();
+        drop(g2);
+        (*s).g2_values = null_mut();
     }
 
-    if !(*s).x_ext_fft_columns.is_null() {
-        let x_ext_fft_columns = core::slice::from_raw_parts_mut(
-            (*s).x_ext_fft_columns,
-            2 * ((FIELD_ELEMENTS_PER_EXT_BLOB / 2) / FIELD_ELEMENTS_PER_CELL),
-        );
-
-        for column in x_ext_fft_columns.iter_mut() {
-            if !(*column).is_null() {
-                let v = Box::from_raw(core::slice::from_raw_parts_mut(
-                    *column,
-                    FIELD_ELEMENTS_PER_CELL,
-                ));
-                drop(v);
-                *column = ptr::null_mut();
-            }
-        }
-
-        let v = Box::from_raw(x_ext_fft_columns);
-        drop(v);
-        (*s).x_ext_fft_columns = ptr::null_mut();
-    }
+    (*s).max_width = 0;
 }
 
 /// # Safety

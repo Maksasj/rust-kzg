@@ -1016,8 +1016,8 @@ pub fn evaluate_polynomial_in_evaluation_form<
 }
 
 fn is_trusted_setup_in_lagrange_form<TG1: G1 + PairingVerify<TG1, TG2>, TG2: G2>(
-    g1_lagrange_values: &[TG1],
-    g2_monomial_values: &[TG2],
+    g1_values: &[TG1],
+    g2_values: &[TG2],
 ) -> bool {
     if g1_lagrange_values.len() < 2 || g2_monomial_values.len() < 2 {
         return false;
