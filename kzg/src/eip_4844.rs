@@ -2,10 +2,12 @@
 extern crate alloc;
 
 use crate::common_utils::reverse_bit_order;
-use crate::eth;
-use crate::eth::c_bindings::CKZGSettings;
-use crate::eth::FIELD_ELEMENTS_PER_EXT_BLOB;
+use crate::fk20_proof::{
+    fk20_multi_da_opt, fk20_single_da_opt, FK20MultiSettings, FK20SingleSettings,
+    KzgFK20MultiSettings, KzgFK20SingleSettings,
+};
 use crate::msm::precompute::PrecomputationTable;
+use crate::FFTFr;
 use crate::G1Affine;
 use crate::G1Fp;
 use crate::G1GetFp;
@@ -18,25 +20,16 @@ use alloc::string::ToString;
 use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
-use sha2::digest::generic_array::sequence;
-use core::cell;
-use core::result;
 pub use blst::{blst_fr, blst_p1, blst_p2};
+use core::cell;
 use core::ffi::c_uint;
 use core::hash::Hash;
 use core::hash::Hasher;
+use core::result;
+use kzg::{FFTFr, Fr};
+use sha2::digest::generic_array::sequence;
 use sha2::{Digest, Sha256};
 use siphasher::sip::SipHasher;
-use kzg::{FFTFr, Fr};
-use crate::common_utils::reverse_bit_order;
-use crate::msm::precompute::PrecomputationTable;
-use crate::FFTFr;
-use crate::G1Affine;
-use crate::G1Fp;
-use crate::G1GetFp;
-use crate::G1LinComb;
-use crate::{FFTSettings, Fr, G1Mul, KZGSettings, PairingVerify, Poly, G1, G2};
-use crate::fk20_proof::{KzgFK20SingleSettings, KzgFK20MultiSettings, FK20SingleSettings, FK20MultiSettings, fk20_single_da_opt, fk20_multi_da_opt};
 
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
@@ -76,8 +69,10 @@ pub const FIELD_ELEMENTS_PER_EXT_BLOB: usize = 2 * FIELD_ELEMENTS_PER_BLOB;
 pub const FIELD_ELEMENTS_PER_CELL: usize = 64;
 pub const BYTES_PER_CELL: usize = FIELD_ELEMENTS_PER_CELL * BYTES_PER_FIELD_ELEMENT;
 pub const CELLS_PER_EXT_BLOB: usize = FIELD_ELEMENTS_PER_EXT_BLOB / FIELD_ELEMENTS_PER_CELL;
-pub const RANDOM_CHALLENGE_KZG_CELL_BATCH_DOMAIN: [u8; 32] = [82, 67, 95, 86, 69, 82, 73, 70, 89, 95, 67, 69, 76, 76, 95, 75,
-90, 71, 95, 80, 82, 79, 79, 70, 95, 66, 65, 84, 67, 72, 95, 86,]; // "b'RCKZGCBATCH__V1_'"
+pub const RANDOM_CHALLENGE_KZG_CELL_BATCH_DOMAIN: [u8; 32] = [
+    82, 67, 95, 86, 69, 82, 73, 70, 89, 95, 67, 69, 76, 76, 95, 75, 90, 71, 95, 80, 82, 79, 79, 70,
+    95, 66, 65, 84, 67, 72, 95, 86,
+]; // "b'RCKZGCBATCH__V1_'"
 
 ////////////////////////////// C API for EIP-4844 //////////////////////////////
 
@@ -873,7 +868,6 @@ pub fn verify_blob_kzg_proof_batch_rust<
     }
 }
 
-
 #[allow(clippy::useless_conversion)]
 pub fn bytes_to_blob<TFr: Fr>(bytes: &[u8]) -> Result<Vec<TFr>, String> {
     if bytes.len() != BYTES_PER_BLOB {
@@ -1090,62 +1084,3 @@ pub fn load_trusted_setup_rust<
     reverse_bit_order(&mut g1_values)?;
     TKZGSettings::new(g1_values.as_slice(), g2_values.as_slice(), max_scale, &fs)
 }
-
-////////////////////////////// Trait based implementations of functions for EIP-7594 //////////////////////////////
-
-pub fn compute_cells_and_kzg_proofs_rust<
-    TFr: Fr, 
-    TPoly: Poly<TFr>,
-    TG1: G1 + G1Mul<TFr> + G1GetFp<TG1Fp> + PairingVerify<TG1, TG2>,
-    TG2: G2,
-    TG1Fp: G1Fp,
-    TG1Affine: G1Affine<TG1, TG1Fp>,
-    TFFTSettings: FFTSettings<TFr> + FFTFr<TFr>,
-    TKZGSettings: KZGSettings<TFr, TG1, TG2, TFFTSettings, TPoly, TG1Fp, TG1Affine>,
->(
-    blob: &[TFr],
-    s: &TKZGSettings,
-) -> Result<
-(
-    Vec<Cell>, 
-    Vec<KZGProof>
-), String>{
-    // Ensure blob length is equal to Bytes per blob
-    if blob.len() != BYTES_PER_BLOB {
-        return Err(String::from("Blob length must be BYTES_PER_BLOB"));
-    }
-    // Convert the blob to a polynomial.
-    polynomial = blob_to_polynomial(blob)?;
-
-    // Allocate arrays to hold cells and proofs
-    let mut cells = vec![TFr::default(); CELLS_PER_EXT_BLOB];
-    let mut proofs = vec![TFr::default(); CELLS_PER_EXT_BLOB];
-
-    // Compute cells
-    let mut data_fr = vec![TFr::zero(); FIELD_ELEMENTS_PER_EXT_BLOB];
-
-    // Perform FFT on the polynomial
-    data_fr = s.get_fft_settings().fft_fr(&polynomial.get_coeffs(), false)?;
-
-    // Perform bit reversal permutation
-    reverse_bit_order(&mut data_fr)?;
-    
-    // Covert field elements to cell bytes
-    for (i, cell) in cells.iter_mut().enumerate() {
-        for j in 0..FIELD_ELEMENTS_PER_CELL {
-            let index = i * FIELD_ELEMENTS_PER_CELL + j;
-            let fr_bytes = data_fr[index].to_bytes();
-            cell.bytes[j * BYTES_PER_FIELD_ELEMENT..(j+1) * BYTES_PER_FIELD_ELEMENT].copy_from_slice(&fr_bytes);
-        }
-    }
-
-    // Compute proofs
-    let mut proofs_g1 = vec![TG1::identity(); CELLS_PER_EXT_BLOB];
-    compute_fk20_proofs(&mut proofs_g1, &polynomial, FIELD_ELEMENTS_PER_BLOB, s);
-    reverse_bit_order(&mut proofs_g1)?;
-
-    Ok((cells, proofs))
-
-}
-
-

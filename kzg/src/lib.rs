@@ -10,9 +10,9 @@ use msm::precompute::PrecomputationTable;
 pub mod common_utils;
 mod das;
 pub mod eip_4844;
-pub mod eth;
-pub mod msm;
+pub mod eip_7694;
 pub mod fk20_proof;
+pub mod msm;
 
 pub use das::{EcBackend, DAS};
 
@@ -139,7 +139,7 @@ pub trait G1GetFp<TFp: G1Fp>: G1 + Clone {
 }
 
 pub trait G1Mul<TFr: Fr>: G1 + Clone {
-    fn mul(&self, b: &TFr) -> Self; 
+    fn mul(&self, b: &TFr) -> Self;
 }
 
 pub trait G1LinComb<TFr: Fr, TG1Fp: G1Fp, TG1Affine: G1Affine<Self, TG1Fp>>:
