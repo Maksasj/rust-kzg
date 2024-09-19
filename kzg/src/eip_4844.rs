@@ -2,12 +2,7 @@
 extern crate alloc;
 
 use crate::common_utils::reverse_bit_order;
-use crate::fk20_proof::{
-    fk20_multi_da_opt, fk20_single_da_opt, FK20MultiSettings, FK20SingleSettings,
-    KzgFK20MultiSettings, KzgFK20SingleSettings,
-};
 use crate::msm::precompute::PrecomputationTable;
-use crate::FFTFr;
 use crate::G1Affine;
 use crate::G1Fp;
 use crate::G1GetFp;
@@ -20,14 +15,11 @@ use alloc::string::ToString;
 use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
+use blst::blst_p1_affine;
 pub use blst::{blst_fr, blst_p1, blst_p2};
-use core::cell;
 use core::ffi::c_uint;
 use core::hash::Hash;
 use core::hash::Hasher;
-use core::result;
-use kzg::{FFTFr, Fr};
-use sha2::digest::generic_array::sequence;
 use sha2::{Digest, Sha256};
 use siphasher::sip::SipHasher;
 
@@ -115,10 +107,57 @@ pub struct KZGProof {
 
 #[repr(C)]
 pub struct CKZGSettings {
-    pub max_width: u64,
+    /**
+     * Roots of unity for the subgroup of size `FIELD_ELEMENTS_PER_EXT_BLOB`.
+     *
+     * The array contains `FIELD_ELEMENTS_PER_EXT_BLOB + 1` elements.
+     * The array starts and ends with Fr::one().
+     */
     pub roots_of_unity: *mut blst_fr,
-    pub g1_values: *mut blst_p1,
-    pub g2_values: *mut blst_p2,
+    /**
+     * Roots of unity for the subgroup of size `FIELD_ELEMENTS_PER_EXT_BLOB` in bit-reversed order.
+     *
+     * This array is derived by applying a bit-reversal permutation to `roots_of_unity`
+     * excluding the last element. Essentially:
+     *   `brp_roots_of_unity = bit_reversal_permutation(roots_of_unity[:-1])`
+     *
+     * The array contains `FIELD_ELEMENTS_PER_EXT_BLOB` elements.
+     */
+    pub brp_roots_of_unity: *mut blst_fr,
+    /**
+     * Roots of unity for the subgroup of size `FIELD_ELEMENTS_PER_EXT_BLOB` in reversed order.
+     *
+     * It is the reversed version of `roots_of_unity`. Essentially:
+     *    `reverse_roots_of_unity = reverse(roots_of_unity)`
+     *
+     * This array is primarily used in FFTs.
+     * The array contains `FIELD_ELEMENTS_PER_EXT_BLOB + 1` elements.
+     * The array starts and ends with Fr::one().
+     */
+    pub reverse_roots_of_unity: *mut blst_fr,
+    /**
+     * G1 group elements from the trusted setup in monomial form.
+     * The array contains `NUM_G1_POINTS = FIELD_ELEMENTS_PER_BLOB` elements.
+     */
+    pub g1_values_monomial: *mut blst_p1,
+    /**
+     * G1 group elements from the trusted setup in Lagrange form and bit-reversed order.
+     * The array contains `NUM_G1_POINTS = FIELD_ELEMENTS_PER_BLOB` elements.
+     */
+    pub g1_values_lagrange_brp: *mut blst_p1,
+    /**
+     * G2 group elements from the trusted setup in monomial form.
+     * The array contains `NUM_G2_POINTS` elements.
+     */
+    pub g2_values_monomial: *mut blst_p2,
+    /** Data used during FK20 proof generation. */
+    pub x_ext_fft_columns: *mut *mut blst_p1,
+    /** The precomputed tables for fixed-base MSM. */
+    pub tables: *mut *mut blst_p1_affine,
+    /** The window size for the fixed-base MSM. */
+    pub wbits: usize,
+    /** The scratch size for the fixed-base MSM. */
+    pub scratch_size: usize,
 }
 
 #[repr(C)]
@@ -206,7 +245,6 @@ where
 
 ////////////////////////////// Utility functions for EIP-4844 //////////////////////////////
 
-#[allow(clippy::type_complexity)]
 pub fn load_trusted_setup_string(contents: &str) -> Result<(Vec<u8>, Vec<u8>, Vec<u8>), String> {
     let mut offset = 0;
 
@@ -1010,19 +1048,15 @@ pub fn evaluate_polynomial_in_evaluation_form<
 }
 
 fn is_trusted_setup_in_lagrange_form<TG1: G1 + PairingVerify<TG1, TG2>, TG2: G2>(
-    g1_values: &[TG1],
-    g2_values: &[TG2],
+    g1_lagrange_values: &[TG1],
+    g2_monomial_values: &[TG2],
 ) -> bool {
     if g1_lagrange_values.len() < 2 || g2_monomial_values.len() < 2 {
         return false;
     }
 
-    let is_monotomial_form = TG1::verify(
-        &g1_lagrange_values[1],
-        &g2_monomial_values[0],
-        &g1_lagrange_values[0],
-        &g2_monomial_values[1],
-    );
+    let is_monotomial_form =
+        TG1::verify(&g1_lagrange_values[1], &g2_monomial_values[0], &g1_lagrange_values[0], &g2_monomial_values[1]);
     !is_monotomial_form
 }
 
@@ -1044,6 +1078,10 @@ pub fn load_trusted_setup_rust<
     if num_g1_points != FIELD_ELEMENTS_PER_BLOB {
         return Err(String::from("Invalid number of G1 points"));
     }
+    if g1_lagrange_bytes.len() / BYTES_PER_G1 != FIELD_ELEMENTS_PER_BLOB {
+        return Err(String::from("Invalid number of G1 points"));
+    }
+
     if g1_lagrange_bytes.len() / BYTES_PER_G1 != FIELD_ELEMENTS_PER_BLOB {
         return Err(String::from("Invalid number of G1 points"));
     }
@@ -1081,6 +1119,6 @@ pub fn load_trusted_setup_rust<
     }
 
     let fs = TFFTSettings::new(max_scale)?;
-    reverse_bit_order(&mut g1_values)?;
-    TKZGSettings::new(g1_values.as_slice(), g2_values.as_slice(), max_scale, &fs)
+
+    TKZGSettings::new(&g1_monomial_values, &g1_lagrange_values, &g2_monomial_values, &fs)
 }

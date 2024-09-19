@@ -27,7 +27,7 @@ pub fn bench_fk_single_da<
     >,
 >(
     c: &mut Criterion,
-    generate_trusted_setup: &dyn Fn(usize, [u8; 32usize]) -> (Vec<B::G1>, Vec<B::G1>, Vec<B::G2>),
+    generate_trusted_setup: &dyn Fn(usize, [u8; 32usize]) -> (Vec<TG1>, Vec<TG1>, Vec<TG2>),
 ) {
     let mut rng = thread_rng();
     let coeffs: Vec<u64> = vec![rng.next_u64(); 1 << (BENCH_SCALE - 1)];
@@ -43,8 +43,8 @@ pub fn bench_fk_single_da<
 
     // Initialise the secrets and data structures
     let (s1, s2, s3) = generate_trusted_setup(secrets_len, SECRET);
-    let fs = B::FFTSettings::new(BENCH_SCALE).unwrap();
-    let ks = B::KZGSettings::new(&s1, &s2, &s3, &fs, 16).unwrap();
+    let fs = TFFTSettings::new(BENCH_SCALE).unwrap();
+    let ks = TKZGSettings::new(&s1, &s2, &s3, &fs).unwrap();
     let fk = TFK20SingleSettings::new(&ks, 2 * poly_len).unwrap();
 
     // Commit to the polynomial
@@ -70,7 +70,7 @@ pub fn bench_fk_multi_da<
     >,
 >(
     c: &mut Criterion,
-    generate_trusted_setup: &dyn Fn(usize, [u8; 32usize]) -> (Vec<B::G1>, Vec<B::G1>, Vec<B::G2>),
+    generate_trusted_setup: &dyn Fn(usize, [u8; 32usize]) -> (Vec<TG1>, Vec<TG1>, Vec<TG2>),
 ) {
     let n = 1 << BENCH_SCALE;
     let chunk_len = 16;
@@ -87,8 +87,8 @@ pub fn bench_fk_multi_da<
 
     // Initialise the secrets and data structures
     let (s1, s2, s3) = generate_trusted_setup(secrets_len, SECRET);
-    let fs = B::FFTSettings::new(width).unwrap();
-    let ks = B::KZGSettings::new(&s1, &s2, &s3, &fs, 16).unwrap();
+    let fs = TFFTSettings::new(width).unwrap();
+    let ks = TKZGSettings::new(&s1, &s2, &s3, &fs).unwrap();
     let fk = TFK20MultiSettings::new(&ks, secrets_len, chunk_len).unwrap();
 
     // Create a test polynomial of size n that's independent of chunk_len

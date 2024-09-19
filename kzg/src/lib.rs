@@ -10,8 +10,8 @@ use msm::precompute::PrecomputationTable;
 pub mod common_utils;
 mod das;
 pub mod eip_4844;
-pub mod eip_7694;
-pub mod fk20_proof;
+// pub mod eip_7694;
+// pub mod fk20_proof;
 pub mod msm;
 
 pub use das::{EcBackend, DAS};
@@ -73,8 +73,6 @@ pub trait Fr: Default + Clone + PartialEq + Sync {
     }
 
     fn to_scalar(&self) -> Scalar256;
-
-    fn modulo(&self, modulus: [u8; 32]) -> Self;
 }
 
 pub trait G1: Clone + Default + PartialEq + Sync + Debug + Send {

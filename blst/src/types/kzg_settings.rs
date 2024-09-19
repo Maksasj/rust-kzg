@@ -4,8 +4,7 @@ use alloc::string::{String, ToString};
 use alloc::sync::Arc;
 use alloc::{vec, vec::Vec};
 
-use kzg::eth::c_bindings::CKZGSettings;
-use kzg::eth::{self, FIELD_ELEMENTS_PER_EXT_BLOB};
+use kzg::eip_4844::{FIELD_ELEMENTS_PER_BLOB, FIELD_ELEMENTS_PER_CELL, FIELD_ELEMENTS_PER_EXT_BLOB, TRUSTED_SETUP_NUM_G2_POINTS};
 use kzg::msm::precompute::{precompute, PrecomputationTable};
 use kzg::{FFTFr, FFTSettings, Fr, G1Mul, G2Mul, KZGSettings, Poly, G1, G2};
 
@@ -30,31 +29,57 @@ pub struct FsKZGSettings {
     pub g2_values_monomial: Vec<FsG2>,
     pub precomputation: Option<Arc<PrecomputationTable<FsFr, FsG1, FsFp, FsG1Affine>>>,
     pub x_ext_fft_columns: Vec<Vec<FsG1>>,
-    pub cell_size: usize,
 }
 
-fn toeplitz_part_1(
-    field_elements_per_ext_blob: usize,
-    output: &mut [FsG1],
-    x: &[FsG1],
-    s: &FsFFTSettings,
-) -> Result<(), String> {
-    let n = x.len();
-    let n2 = n * 2;
-    let mut x_ext = vec![FsG1::identity(); n2];
-
-    x_ext[..n].copy_from_slice(x);
-
-    let x_ext = &x_ext[..];
+fn g1_fft(output: &mut [FsG1], input: &[FsG1], s: &FsFFTSettings) -> Result<(), String> {
+    // g1_t *out, const g1_t *in, size_t n, const KZGSettings *s
 
     /* Ensure the length is valid */
-    if x_ext.len() > field_elements_per_ext_blob || !x_ext.len().is_power_of_two() {
+    if input.len() > FIELD_ELEMENTS_PER_EXT_BLOB || !input.len().is_power_of_two() {
         return Err("Invalid input size".to_string());
     }
 
-    let roots_stride = field_elements_per_ext_blob / x_ext.len();
-    fft_g1_fast(output, x_ext, 1, &s.roots_of_unity, roots_stride);
+    let roots_stride = FIELD_ELEMENTS_PER_EXT_BLOB / input.len();
+    fft_g1_fast(output, input, 1, &s.roots_of_unity, roots_stride);
 
+    return Ok(());
+}
+
+fn toeplitz_part_1(output: &mut [FsG1], x: &[FsG1], s: &FsFFTSettings) -> Result<(), String> {
+    // g1_t *out, const g1_t *x, size_t n, const KZGSettings *s
+
+    //     C_KZG_RET ret;
+    //     size_t n2 = n * 2;
+    let n = x.len();
+    let n2 = n * 2;
+    //     g1_t *x_ext;
+
+    //     /* Create extended array of points */
+    //     ret = new_g1_array(&x_ext, n2);
+    let mut x_ext = vec![FsG1::identity(); n2];
+    //     if (ret != C_KZG_OK) goto out;
+
+    //     /* Copy x & extend with zero */
+    //     for (size_t i = 0; i < n; i++) {
+    //         x_ext[i] = x[i];
+    //     }
+
+    for i in 0..n {
+        x_ext[i] = x[i];
+    }
+
+    //     for (size_t i = n; i < n2; i++) {
+    //         x_ext[i] = G1_IDENTITY;
+    //     }
+
+    //     /* Peform forward transformation */
+    g1_fft(output, &x_ext, s)?;
+    //     ret = g1_fft(out, x_ext, n2, s);
+    //     if (ret != C_KZG_OK) goto out;
+
+    // out:
+    //     c_kzg_free(x_ext);
+    //     return ret;
     Ok(())
 }
 
@@ -66,35 +91,51 @@ impl KZGSettings<FsFr, FsG1, FsG2, FsFFTSettings, FsPoly, FsFp, FsG1Affine> for 
         fft_settings: &FsFFTSettings,
         cell_size: usize,
     ) -> Result<Self, String> {
-        if g1_monomial.len() != g1_lagrange_brp.len() {
-            return Err("G1 point length mismatch".to_string());
+        if g1_monomial.len() != FIELD_ELEMENTS_PER_BLOB || g1_lagrange_brp.len() != FIELD_ELEMENTS_PER_BLOB || g2_monomial.len() != TRUSTED_SETUP_NUM_G2_POINTS {
+            return Err("Length does not match FIELD_ELEMENTS_PER_BLOB".to_string());
         }
 
-        let field_elements_per_blob = g1_monomial.len();
-        let field_elements_per_ext_blob = field_elements_per_blob * 2;
-
-        let n = field_elements_per_ext_blob / 2;
-        let k = n / cell_size;
+        let n = FIELD_ELEMENTS_PER_EXT_BLOB / 2;
+        let k = n / FIELD_ELEMENTS_PER_CELL;
         let k2 = 2 * k;
 
         let mut points = vec![FsG1::default(); k2];
         let mut x = vec![FsG1::default(); k];
-        let mut x_ext_fft_columns = vec![vec![FsG1::default(); cell_size]; k2];
+        let mut x_ext_fft_columns = vec![vec![FsG1::default(); FIELD_ELEMENTS_PER_CELL]; k2];
 
-        for offset in 0..cell_size {
-            let start = n - cell_size - 1 - offset;
-            for (i, p) in x.iter_mut().enumerate().take(k - 1) {
-                let j = start - i * cell_size;
-                *p = g1_monomial[j];
+        for offset in 0..FIELD_ELEMENTS_PER_CELL {
+            let start = n - FIELD_ELEMENTS_PER_CELL - 1 - offset;
+            for i in 0..(k - 1) {
+                let j = start - i * FIELD_ELEMENTS_PER_CELL;
+                x[i] = g1_monomial[j];
             }
             x[k - 1] = FsG1::identity();
 
-            toeplitz_part_1(field_elements_per_ext_blob, &mut points, &x, fft_settings)?;
+            toeplitz_part_1(&mut points, &x, &fft_settings)?;
 
             for row in 0..k2 {
                 x_ext_fft_columns[row][offset] = points[row];
             }
         }
+
+        // for (size_t offset = 0; offset < FIELD_ELEMENTS_PER_CELL; offset++) {
+        //     /* Compute x, sections of the g1 values */
+        //     size_t start = n - FIELD_ELEMENTS_PER_CELL - 1 - offset;
+        //     for (size_t i = 0; i < k - 1; i++) {
+        //         size_t j = start - i * FIELD_ELEMENTS_PER_CELL;
+        //         x[i] = s->g1_values_monomial[j];
+        //     }
+        //     x[k - 1] = G1_IDENTITY;
+
+        //     /* Compute points, the fft of an extended x */
+        //     ret = toeplitz_part_1(points, x, k, s);
+        //     if (ret != C_KZG_OK) goto out;
+
+        //     /* Reorganize from rows into columns */
+        //     for (size_t row = 0; row < k2; row++) {
+        //         s->x_ext_fft_columns[row][offset] = points[row];
+        //     }
+        // }
 
         Ok(Self {
             g1_values_monomial: g1_monomial.to_vec(),
@@ -277,15 +318,11 @@ impl KZGSettings<FsFr, FsG1, FsG2, FsFFTSettings, FsPoly, FsFp, FsG1Affine> for 
         &self.fs
     }
 
-    fn get_g1_lagrange_brp(&self) -> &[FsG1] {
+    fn get_g1_secret(&self) -> &[FsG1] {
         &self.g1_values_lagrange_brp
     }
 
-    fn get_g1_monomial(&self) -> &[FsG1] {
-        &self.g1_values_monomial
-    }
-
-    fn get_g2_monomial(&self) -> &[FsG2] {
+    fn get_g2_secret(&self) -> &[FsG2] {
         &self.g2_values_monomial
     }
 

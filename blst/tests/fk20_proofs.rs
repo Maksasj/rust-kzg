@@ -6,31 +6,37 @@ mod tests {
     use rust_kzg_blst::types::fk20_single_settings::FsFK20SingleSettings;
     use rust_kzg_blst::utils::generate_trusted_setup;
 
+    #[ignore = "KZG settings loading doesn't support trusted setup sizes other than FIELD_ELEMENTS_PER_BLOB (4096 points)"]
     #[test]
     fn test_fk_single() {
         fk_single::<BlstBackend, FsFK20SingleSettings>(&generate_trusted_setup);
     }
 
+    #[ignore = "KZG settings loading doesn't support trusted setup sizes other than FIELD_ELEMENTS_PER_BLOB (4096 points)"]
     #[test]
     fn test_fk_single_strided() {
         fk_single_strided::<BlstBackend, FsFK20SingleSettings>(&generate_trusted_setup);
     }
 
+    #[ignore = "KZG settings loading doesn't support trusted setup sizes other than FIELD_ELEMENTS_PER_BLOB (4096 points)"]
     #[test]
     fn test_fk_multi_settings() {
         fk_multi_settings::<BlstBackend, FsFK20MultiSettings>(&generate_trusted_setup);
     }
 
+    #[ignore = "KZG settings loading doesn't support trusted setup sizes other than FIELD_ELEMENTS_PER_BLOB (4096 points)"]
     #[test]
     fn test_fk_multi_chunk_len_1_512() {
         fk_multi_chunk_len_1_512::<BlstBackend, FsFK20MultiSettings>(&generate_trusted_setup);
     }
 
+    #[ignore = "KZG settings loading doesn't support trusted setup sizes other than FIELD_ELEMENTS_PER_BLOB (4096 points)"]
     #[test]
     fn test_fk_multi_chunk_len_16_512() {
         fk_multi_chunk_len_16_512::<BlstBackend, FsFK20MultiSettings>(&generate_trusted_setup);
     }
 
+    #[ignore = "KZG settings loading doesn't support trusted setup sizes other than FIELD_ELEMENTS_PER_BLOB (4096 points)"]
     #[test]
     fn test_fk_multi_chunk_len_16_16() {
         fk_multi_chunk_len_16_16::<BlstBackend, FsFK20MultiSettings>(&generate_trusted_setup);

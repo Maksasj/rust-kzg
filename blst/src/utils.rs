@@ -11,10 +11,7 @@ use crate::types::fr::FsFr;
 use crate::types::g1::{FsG1, FsG1Affine};
 use crate::types::g2::FsG2;
 
-pub fn generate_trusted_setup(
-    n: usize,
-    secret: [u8; 32usize],
-) -> (Vec<FsG1>, Vec<FsG1>, Vec<FsG2>) {
+pub fn generate_trusted_setup(n: usize, secret: [u8; 32usize]) -> (Vec<FsG1>, Vec<FsG1>, Vec<FsG2>) {
     let s = hash_to_bls_field(&secret);
     let mut s_pow = Fr::one();
 
@@ -24,7 +21,7 @@ pub fn generate_trusted_setup(
 
     for _ in 0..n {
         s1.push(G1_GENERATOR.mul(&s_pow));
-        s2.push(G1_GENERATOR.mul(&s_pow)); // TODO: this should be lagrange form
+        s2.push(G1_GENERATOR); // TODO: this should be lagrange form
         s3.push(G2_GENERATOR.mul(&s_pow));
 
         s_pow = s_pow.mul(&s);

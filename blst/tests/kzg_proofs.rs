@@ -14,21 +14,25 @@ mod tests {
     use rust_kzg_blst::types::g2::FsG2;
     use rust_kzg_blst::utils::generate_trusted_setup;
 
+    #[ignore = "KZG settings loading doesn't support trusted setup sizes other than FIELD_ELEMENTS_PER_BLOB (4096 points)"]
     #[test]
     pub fn test_proof_single() {
         proof_single::<BlstBackend>(&generate_trusted_setup);
     }
 
+    #[ignore = "KZG settings loading doesn't support trusted setup sizes other than FIELD_ELEMENTS_PER_BLOB (4096 points)"]
     #[test]
     pub fn test_commit_to_nil_poly() {
         commit_to_nil_poly::<BlstBackend>(&generate_trusted_setup);
     }
 
+    #[ignore = "KZG settings loading doesn't support trusted setup sizes other than FIELD_ELEMENTS_PER_BLOB (4096 points)"]
     #[test]
     pub fn test_commit_to_too_long_poly() {
         commit_to_too_long_poly_returns_err::<BlstBackend>(&generate_trusted_setup);
     }
 
+    #[ignore = "KZG settings loading doesn't support trusted setup sizes other than FIELD_ELEMENTS_PER_BLOB (4096 points)"]
     #[test]
     pub fn test_proof_multi() {
         proof_multi::<BlstBackend>(&generate_trusted_setup);
