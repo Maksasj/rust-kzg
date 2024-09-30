@@ -4,7 +4,10 @@ use alloc::string::{String, ToString};
 use alloc::sync::Arc;
 use alloc::{vec, vec::Vec};
 
-use kzg::eip_4844::{FIELD_ELEMENTS_PER_BLOB, FIELD_ELEMENTS_PER_CELL, FIELD_ELEMENTS_PER_EXT_BLOB, TRUSTED_SETUP_NUM_G2_POINTS};
+use kzg::eip_4844::{
+    FIELD_ELEMENTS_PER_BLOB, FIELD_ELEMENTS_PER_CELL, FIELD_ELEMENTS_PER_EXT_BLOB,
+    TRUSTED_SETUP_NUM_G2_POINTS,
+};
 use kzg::msm::precompute::{precompute, PrecomputationTable};
 use kzg::{FFTFr, FFTSettings, Fr, G1Mul, G2Mul, KZGSettings, Poly, G1, G2};
 
@@ -91,7 +94,10 @@ impl KZGSettings<FsFr, FsG1, FsG2, FsFFTSettings, FsPoly, FsFp, FsG1Affine> for 
         fft_settings: &FsFFTSettings,
         cell_size: usize,
     ) -> Result<Self, String> {
-        if g1_monomial.len() != FIELD_ELEMENTS_PER_BLOB || g1_lagrange_brp.len() != FIELD_ELEMENTS_PER_BLOB || g2_monomial.len() != TRUSTED_SETUP_NUM_G2_POINTS {
+        if g1_monomial.len() != FIELD_ELEMENTS_PER_BLOB
+            || g1_lagrange_brp.len() != FIELD_ELEMENTS_PER_BLOB
+            || g2_monomial.len() != TRUSTED_SETUP_NUM_G2_POINTS
+        {
             return Err("Length does not match FIELD_ELEMENTS_PER_BLOB".to_string());
         }
 
