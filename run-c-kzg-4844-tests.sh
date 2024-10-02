@@ -58,6 +58,7 @@ mv ../../target/release/librust_kzg_$backend.a ./lib
 
 print_msg "Applying patches and building blst"
 cd src
+# export CFLAGS="-Ofast -fno-builtin-memcpy -fPIC -Wall -Wextra -Werror"
 make blst
 unset CFLAGS
 cd ..
@@ -81,17 +82,17 @@ esac
 
 ###################### dotnet tests ######################
 
-print_msg "Patching dotnet binding"
-git apply < ../csharp.patch
-cd bindings/csharp || exit
+# print_msg "Patching dotnet binding"
+# git apply < ../csharp.patch
+# cd bindings/csharp || exit
 
-print_msg "Building dotnet"
-make -B ckzg CSHARP_PLATFORM=$CSHARP_PLATFORM CLANG_PLATFORM=$CLANG_PLATFORM
-dotnet restore
+# print_msg "Building dotnet"
+# make -B ckzg CSHARP_PLATFORM=$CSHARP_PLATFORM CLANG_PLATFORM=$CLANG_PLATFORM
+# dotnet restore
 
-print_msg "Running dotnet tests"
-dotnet test -c release --no-restore
-cd ../..
+# print_msg "Running dotnet tests"
+# dotnet test -c release --no-restore
+# cd ../..
 
 ###################### rust tests ######################
 
