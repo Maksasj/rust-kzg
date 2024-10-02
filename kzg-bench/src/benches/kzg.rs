@@ -9,7 +9,16 @@ pub const SECRET: [u8; 32usize] = [
 const BENCH_SCALE: usize = 15;
 
 #[allow(clippy::type_complexity)]
-pub fn bench_commit_to_poly<B: EcBackend>(
+pub fn bench_commit_to_poly<
+    TFr: Fr,
+    TG1: G1 + G1Mul<TFr> + G1GetFp<TG1Fp>,
+    TG2: G2,
+    TPoly: Poly<TFr>,
+    TFFTSettings: FFTSettings<TFr>,
+    TKZGSettings: KZGSettings<TFr, TG1, TG2, TFFTSettings, TPoly, TG1Fp, TG1Affine>,
+    TG1Fp: G1Fp,
+    TG1Affine: G1Affine<TG1, TG1Fp>,
+>(
     c: &mut Criterion,
     generate_trusted_setup: &dyn Fn(usize, [u8; 32usize]) -> (Vec<TG1>, Vec<TG1>, Vec<TG2>),
 ) {
@@ -25,7 +34,16 @@ pub fn bench_commit_to_poly<B: EcBackend>(
 }
 
 #[allow(clippy::type_complexity)]
-pub fn bench_compute_proof_single<B: EcBackend>(
+pub fn bench_compute_proof_single<
+    TFr: Fr,
+    TG1: G1 + G1Mul<TFr> + G1GetFp<TG1Fp>,
+    TG2: G2,
+    TPoly: Poly<TFr>,
+    TFFTSettings: FFTSettings<TFr>,
+    TKZGSettings: KZGSettings<TFr, TG1, TG2, TFFTSettings, TPoly, TG1Fp, TG1Affine>,
+    TG1Fp: G1Fp,
+    TG1Affine: G1Affine<TG1, TG1Fp>,
+>(
     c: &mut Criterion,
     generate_trusted_setup: &dyn Fn(usize, [u8; 32usize]) -> (Vec<TG1>, Vec<TG1>, Vec<TG2>),
 ) {
