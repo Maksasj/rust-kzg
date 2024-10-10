@@ -298,11 +298,15 @@ impl KZGSettings<FsFr, FsG1, FsG2, FsFFTSettings, FsPoly, FsFp, FsG1Affine> for 
         &self.fs
     }
 
-    fn get_g1_secret(&self) -> &[FsG1] {
+    fn get_g1_lagrange_brp(&self) -> &[FsG1] {
         &self.g1_values_lagrange_brp
     }
 
-    fn get_g2_secret(&self) -> &[FsG2] {
+    fn get_g1_monomial(&self) -> &[FsG1] {
+        &self.g1_values_monomial
+    }
+
+    fn get_g2_monomial(&self) -> &[FsG2] {
         &self.g2_values_monomial
     }
 
@@ -312,133 +316,5 @@ impl KZGSettings<FsFr, FsG1, FsG2, FsFFTSettings, FsPoly, FsFp, FsG1Affine> for 
 
     fn get_x_ext_fft_column(&self, index: usize) -> &[FsG1] {
         &self.x_ext_fft_columns[index]
-    }
-
-    fn get_cell_size(&self) -> usize {
-        self.cell_size
-    }
-}
-
-impl<'a> TryFrom<&'a CKZGSettings> for FsKZGSettings {
-    type Error = String;
-
-    fn try_from(settings: &'a CKZGSettings) -> Result<Self, Self::Error> {
-        let roots_of_unity = unsafe {
-            core::slice::from_raw_parts(settings.roots_of_unity, FIELD_ELEMENTS_PER_EXT_BLOB + 1)
-                .iter()
-                .map(|r| FsFr(blst::blst_fr { l: r.l }))
-                .collect::<Vec<FsFr>>()
-        };
-
-        let brp_roots_of_unity = unsafe {
-            core::slice::from_raw_parts(settings.brp_roots_of_unity, FIELD_ELEMENTS_PER_EXT_BLOB)
-                .iter()
-                .map(|r| FsFr(blst::blst_fr { l: r.l }))
-                .collect::<Vec<FsFr>>()
-        };
-
-        let reverse_roots_of_unity = unsafe {
-            core::slice::from_raw_parts(
-                settings.reverse_roots_of_unity,
-                FIELD_ELEMENTS_PER_EXT_BLOB + 1,
-            )
-            .iter()
-            .map(|r| FsFr(blst::blst_fr { l: r.l }))
-            .collect::<Vec<FsFr>>()
-        };
-
-        let fft_settings = FsFFTSettings {
-            max_width: FIELD_ELEMENTS_PER_EXT_BLOB,
-            root_of_unity: roots_of_unity[1],
-            roots_of_unity,
-            brp_roots_of_unity,
-            reverse_roots_of_unity,
-        };
-
-        Ok(FsKZGSettings {
-            fs: fft_settings,
-            g1_values_monomial: unsafe {
-                core::slice::from_raw_parts(
-                    settings.g1_values_monomial,
-                    eth::FIELD_ELEMENTS_PER_BLOB,
-                )
-            }
-            .iter()
-            .map(|r| {
-                FsG1(blst::blst_p1 {
-                    x: blst::blst_fp { l: r.x.l },
-                    y: blst::blst_fp { l: r.y.l },
-                    z: blst::blst_fp { l: r.z.l },
-                })
-            })
-            .collect::<Vec<_>>(),
-            g1_values_lagrange_brp: unsafe {
-                core::slice::from_raw_parts(
-                    settings.g1_values_lagrange_brp,
-                    eth::FIELD_ELEMENTS_PER_BLOB,
-                )
-            }
-            .iter()
-            .map(|r| {
-                FsG1(blst::blst_p1 {
-                    x: blst::blst_fp { l: r.x.l },
-                    y: blst::blst_fp { l: r.y.l },
-                    z: blst::blst_fp { l: r.z.l },
-                })
-            })
-            .collect::<Vec<_>>(),
-            g2_values_monomial: unsafe {
-                core::slice::from_raw_parts(
-                    settings.g2_values_monomial,
-                    eth::TRUSTED_SETUP_NUM_G2_POINTS,
-                )
-            }
-            .iter()
-            .map(|r| {
-                FsG2(blst::blst_p2 {
-                    x: blst::blst_fp2 {
-                        fp: [
-                            blst::blst_fp { l: r.x.fp[0].l },
-                            blst::blst_fp { l: r.x.fp[1].l },
-                        ],
-                    },
-                    y: blst::blst_fp2 {
-                        fp: [
-                            blst::blst_fp { l: r.y.fp[0].l },
-                            blst::blst_fp { l: r.y.fp[1].l },
-                        ],
-                    },
-                    z: blst::blst_fp2 {
-                        fp: [
-                            blst::blst_fp { l: r.z.fp[0].l },
-                            blst::blst_fp { l: r.z.fp[1].l },
-                        ],
-                    },
-                })
-            })
-            .collect::<Vec<_>>(),
-            x_ext_fft_columns: unsafe {
-                core::slice::from_raw_parts(
-                    settings.x_ext_fft_columns,
-                    2 * ((FIELD_ELEMENTS_PER_EXT_BLOB / 2) / eth::FIELD_ELEMENTS_PER_CELL),
-                )
-            }
-            .iter()
-            .map(|it| {
-                unsafe { core::slice::from_raw_parts(*it, eth::FIELD_ELEMENTS_PER_CELL) }
-                    .iter()
-                    .map(|r| {
-                        FsG1(blst::blst_p1 {
-                            x: blst::blst_fp { l: r.x.l },
-                            y: blst::blst_fp { l: r.y.l },
-                            z: blst::blst_fp { l: r.z.l },
-                        })
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .collect::<Vec<_>>(),
-            precomputation: unsafe { PRECOMPUTATION_TABLES.get_precomputation(settings) },
-            cell_size: eth::FIELD_ELEMENTS_PER_CELL,
-        })
     }
 }

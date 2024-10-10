@@ -10,7 +10,7 @@ use msm::precompute::PrecomputationTable;
 pub mod common_utils;
 mod das;
 pub mod eip_4844;
-// pub mod eip_7694;
+pub mod eip_7594;
 // pub mod fk20_proof;
 pub mod msm;
 
@@ -559,8 +559,6 @@ pub trait KZGSettings<
     fn get_precomputation(&self) -> Option<&PrecomputationTable<Coeff1, Coeff2, TG1Fp, TG1Affine>>;
 
     fn get_x_ext_fft_column(&self, index: usize) -> &[Coeff2];
-
-    fn get_cell_size(&self) -> usize;
 }
 
 pub trait FK20SingleSettings<
