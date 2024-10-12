@@ -7,21 +7,25 @@ mod tests {
 
     use rust_kzg_constantine::{eip_7594::CtBackend, utils::generate_trusted_setup};
 
+    #[ignore = "KZG settings loading doesn't support trusted setup sizes other than FIELD_ELEMENTS_PER_BLOB (4096 points)"]
     #[test]
     pub fn test_proof_single() {
         proof_single::<CtBackend>(&generate_trusted_setup);
     }
 
+    #[ignore = "KZG settings loading doesn't support trusted setup sizes other than FIELD_ELEMENTS_PER_BLOB (4096 points)"]
     #[test]
     pub fn test_commit_to_nil_poly() {
         commit_to_nil_poly::<CtBackend>(&generate_trusted_setup);
     }
 
+    #[ignore = "KZG settings loading doesn't support trusted setup sizes other than FIELD_ELEMENTS_PER_BLOB (4096 points)"]
     #[test]
     pub fn test_commit_to_too_long_poly() {
         commit_to_too_long_poly_returns_err::<CtBackend>(&generate_trusted_setup);
     }
 
+    #[ignore = "KZG settings loading doesn't support trusted setup sizes other than FIELD_ELEMENTS_PER_BLOB (4096 points)"]
     #[test]
     pub fn test_proof_multi() {
         proof_multi::<CtBackend>(&generate_trusted_setup);

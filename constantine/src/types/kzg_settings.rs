@@ -4,8 +4,10 @@ use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use kzg::eip_4844::{FIELD_ELEMENTS_PER_BLOB, TRUSTED_SETUP_NUM_G2_POINTS};
-use kzg::eth::c_bindings::CKZGSettings;
+use kzg::eip_4844::{
+    FIELD_ELEMENTS_PER_BLOB, FIELD_ELEMENTS_PER_CELL, FIELD_ELEMENTS_PER_EXT_BLOB,
+    TRUSTED_SETUP_NUM_G2_POINTS,
+};
 use kzg::msm::precompute::{precompute, PrecomputationTable};
 use kzg::{eth, FFTFr, FFTSettings, Fr, G1Mul, G2Mul, KZGSettings, Poly, G1, G2};
 
@@ -30,30 +32,28 @@ pub struct CtKZGSettings {
     pub g2_values_monomial: Vec<CtG2>,
     pub precomputation: Option<Arc<PrecomputationTable<CtFr, CtG1, CtFp, CtG1Affine>>>,
     pub x_ext_fft_columns: Vec<Vec<CtG1>>,
-    pub cell_size: usize,
 }
 
-fn toeplitz_part_1(
-    field_elements_per_ext_blob: usize,
-    output: &mut [CtG1],
-    x: &[CtG1],
-    s: &CtFFTSettings,
-) -> Result<(), String> {
+fn g1_fft(output: &mut [CtG1], input: &[CtG1], s: &CtFFTSettings) -> Result<(), String> {
+    /* Ensure the length is valid */
+    if input.len() > FIELD_ELEMENTS_PER_EXT_BLOB || !input.len().is_power_of_two() {
+        return Err("Invalid input size".to_string());
+    }
+
+    let roots_stride = FIELD_ELEMENTS_PER_EXT_BLOB / input.len();
+    fft_g1_fast(output, input, 1, &s.roots_of_unity, roots_stride);
+
+    Ok(())
+}
+
+fn toeplitz_part_1(output: &mut [CtG1], x: &[CtG1], s: &CtFFTSettings) -> Result<(), String> {
     let n = x.len();
     let n2 = n * 2;
     let mut x_ext = vec![CtG1::identity(); n2];
 
     x_ext[..n].copy_from_slice(x);
 
-    let x_ext = &x_ext[..];
-
-    /* Ensure the length is valid */
-    if x_ext.len() > field_elements_per_ext_blob || !x_ext.len().is_power_of_two() {
-        return Err("Invalid input size".to_string());
-    }
-
-    let roots_stride = field_elements_per_ext_blob / x_ext.len();
-    fft_g1_fast(output, x_ext, 1, &s.roots_of_unity, roots_stride);
+    g1_fft(output, &x_ext, s)?;
 
     Ok(())
 }
@@ -66,30 +66,30 @@ impl KZGSettings<CtFr, CtG1, CtG2, CtFFTSettings, CtPoly, CtFp, CtG1Affine> for 
         fft_settings: &CtFFTSettings,
         cell_size: usize,
     ) -> Result<Self, String> {
-        if g1_monomial.len() != g1_lagrange_brp.len() {
-            return Err("G1 point length mismatch".to_string());
+        if g1_monomial.len() != FIELD_ELEMENTS_PER_BLOB
+            || g1_lagrange_brp.len() != FIELD_ELEMENTS_PER_BLOB
+            || g2_monomial.len() != TRUSTED_SETUP_NUM_G2_POINTS
+        {
+            return Err("Length does not match FIELD_ELEMENTS_PER_BLOB".to_string());
         }
 
-        let field_elements_per_blob = g1_monomial.len();
-        let field_elements_per_ext_blob = field_elements_per_blob * 2;
-
-        let n = field_elements_per_ext_blob / 2;
-        let k = n / cell_size;
+        let n = FIELD_ELEMENTS_PER_EXT_BLOB / 2;
+        let k = n / FIELD_ELEMENTS_PER_CELL;
         let k2 = 2 * k;
 
         let mut points = vec![CtG1::default(); k2];
         let mut x = vec![CtG1::default(); k];
-        let mut x_ext_fft_columns = vec![vec![CtG1::default(); cell_size]; k2];
+        let mut x_ext_fft_columns = vec![vec![CtG1::default(); FIELD_ELEMENTS_PER_CELL]; k2];
 
-        for offset in 0..cell_size {
-            let start = n - cell_size - 1 - offset;
+        for offset in 0..FIELD_ELEMENTS_PER_CELL {
+            let start = n - FIELD_ELEMENTS_PER_CELL - 1 - offset;
             for (i, p) in x.iter_mut().enumerate().take(k - 1) {
-                let j = start - i * cell_size;
+                let j = start - i * FIELD_ELEMENTS_PER_CELL;
                 *p = g1_monomial[j];
             }
             x[k - 1] = CtG1::identity();
 
-            toeplitz_part_1(field_elements_per_ext_blob, &mut points, &x, fft_settings)?;
+            toeplitz_part_1(&mut points, &x, fft_settings)?;
 
             for row in 0..k2 {
                 x_ext_fft_columns[row][offset] = points[row];
@@ -103,7 +103,6 @@ impl KZGSettings<CtFr, CtG1, CtG2, CtFFTSettings, CtPoly, CtFp, CtG1Affine> for 
             fs: fft_settings.clone(),
             x_ext_fft_columns,
             precomputation: precompute(g1_lagrange_brp).ok().flatten().map(Arc::new),
-            cell_size,
         })
     }
 
@@ -273,59 +272,5 @@ impl KZGSettings<CtFr, CtG1, CtG2, CtFFTSettings, CtPoly, CtFp, CtG1Affine> for 
 
     fn get_x_ext_fft_column(&self, index: usize) -> &[CtG1] {
         &self.x_ext_fft_columns[index]
-    }
-
-    fn get_cell_size(&self) -> usize {
-        self.cell_size
-    }
-}
-
-impl<'a> TryFrom<&'a CKZGSettings> for CtKZGSettings {
-    type Error = String;
-
-    fn try_from(c_settings: &'a CKZGSettings) -> Result<Self, Self::Error> {
-        Ok(CtKZGSettings {
-            fs: fft_settings_to_rust(c_settings)?,
-            g1_values_monomial: unsafe {
-                core::slice::from_raw_parts(c_settings.g1_values_monomial, FIELD_ELEMENTS_PER_BLOB)
-            }
-            .iter()
-            .map(|r| CtG1::from_blst_p1(*r))
-            .collect::<Vec<_>>(),
-            g1_values_lagrange_brp: unsafe {
-                core::slice::from_raw_parts(
-                    c_settings.g1_values_lagrange_brp,
-                    FIELD_ELEMENTS_PER_BLOB,
-                )
-            }
-            .iter()
-            .map(|r| CtG1::from_blst_p1(*r))
-            .collect::<Vec<_>>(),
-            g2_values_monomial: unsafe {
-                core::slice::from_raw_parts(
-                    c_settings.g2_values_monomial,
-                    TRUSTED_SETUP_NUM_G2_POINTS,
-                )
-            }
-            .iter()
-            .map(|r| CtG2::from_blst_p2(*r))
-            .collect::<Vec<_>>(),
-            x_ext_fft_columns: unsafe {
-                core::slice::from_raw_parts(
-                    c_settings.x_ext_fft_columns,
-                    2 * ((eth::FIELD_ELEMENTS_PER_EXT_BLOB / 2) / eth::FIELD_ELEMENTS_PER_CELL),
-                )
-            }
-            .iter()
-            .map(|it| {
-                unsafe { core::slice::from_raw_parts(*it, eth::FIELD_ELEMENTS_PER_CELL) }
-                    .iter()
-                    .map(|it| CtG1::from_blst_p1(*it))
-                    .collect::<Vec<_>>()
-            })
-            .collect::<Vec<_>>(),
-            precomputation: unsafe { PRECOMPUTATION_TABLES.get_precomputation(c_settings) },
-            cell_size: eth::FIELD_ELEMENTS_PER_CELL,
-        })
     }
 }

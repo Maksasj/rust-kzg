@@ -1,28 +1,38 @@
-extern crate alloc;
+use kzg::eip_4844::FIELD_ELEMENTS_PER_CELL;
 
-use kzg::EcBackend;
+use crate::types::{fr::CtFr, g1::CtG1, kzg_settings::CtKZGSettings};
 
-use crate::types::fft_settings::CtFFTSettings;
-use crate::types::fp::CtFp;
-use crate::types::fr::CtFr;
-use crate::types::g1::CtG1;
-use crate::types::g1::CtG1Affine;
-use crate::types::g2::CtG2;
-use crate::types::kzg_settings::CtKZGSettings;
-use crate::types::poly::CtPoly;
-
-pub struct CtBackend;
-
-impl EcBackend for CtBackend {
-    type Fr = CtFr;
-    type G1Fp = CtFp;
-    type G1Affine = CtG1Affine;
-    type G1 = CtG1;
-    type G2 = CtG2;
-    type Poly = CtPoly;
-    type FFTSettings = CtFFTSettings;
-    type KZGSettings = CtKZGSettings;
+pub fn compute_cells_and_kzg_proofs_rust(
+    cells: Option<&mut [[CtFr; FIELD_ELEMENTS_PER_CELL]]>,
+    proofs: Option<&mut [CtG1]>,
+    blob: &[CtFr],
+    s: &CtKZGSettings,
+) -> Result<(), String> {
+    kzg::eip_7594::compute_cells_and_kzg_proofs(cells, proofs, blob, s)
 }
 
-#[cfg(feature = "c_bindings")]
-kzg::c_bindings_eip7594!(CtBackend);
+pub fn recover_cells_and_kzg_proofs_rust(
+    recovered_cells: &mut [[CtFr; FIELD_ELEMENTS_PER_CELL]],
+    recovered_proofs: Option<&mut [CtG1]>,
+    cell_indicies: &[usize],
+    cells: &[[CtFr; FIELD_ELEMENTS_PER_CELL]],
+    s: &CtKZGSettings,
+) -> Result<(), String> {
+    kzg::eip_7594::recover_cells_and_kzg_proofs(
+        recovered_cells,
+        recovered_proofs,
+        cell_indicies,
+        cells,
+        s,
+    )
+}
+
+pub fn verify_cell_kzg_proof_batch_rust(
+    commitments: &[CtG1],
+    cell_indices: &[usize],
+    cells: &[[CtFr; FIELD_ELEMENTS_PER_CELL]],
+    proofs: &[CtG1],
+    s: &CtKZGSettings,
+) -> Result<bool, String> {
+    kzg::eip_7594::verify_cell_kzg_proof_batch(commitments, cell_indices, cells, proofs, s)
+}
