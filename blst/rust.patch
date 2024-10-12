@@ -28,7 +28,7 @@ index 45eb72d..994c83f 100644
 -    // Obtain the header files of blst
 -    let blst_base_dir = root_dir.join("blst");
 -    let blst_headers_dir = blst_base_dir.join("bindings");
-+    let rust_kzg_target_dir = root_dir.join("../../target/release/");
++    let rust_kzg_target_dir = root_dir.join("lib");
  
 -    let c_src_dir = root_dir.join("src");
 -
