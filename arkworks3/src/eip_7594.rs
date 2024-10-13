@@ -1,28 +1,38 @@
-extern crate alloc;
+use kzg::eip_4844::FIELD_ELEMENTS_PER_CELL;
 
-use kzg::EcBackend;
+use crate::kzg_types::{ArkFr, ArkG1, ArkKZGSettings};
 
-use crate::kzg_proofs::FFTSettings;
-use crate::kzg_proofs::KZGSettings;
-use crate::kzg_types::ArkFp;
-use crate::kzg_types::ArkFr;
-use crate::kzg_types::ArkG1;
-use crate::kzg_types::ArkG1Affine;
-use crate::kzg_types::ArkG2;
-use crate::utils::PolyData;
-
-pub struct ArkBackend;
-
-impl EcBackend for ArkBackend {
-    type Fr = ArkFr;
-    type G1Fp = ArkFp;
-    type G1Affine = ArkG1Affine;
-    type G1 = ArkG1;
-    type G2 = ArkG2;
-    type Poly = PolyData;
-    type FFTSettings = FFTSettings;
-    type KZGSettings = KZGSettings;
+pub fn compute_cells_and_kzg_proofs_rust(
+    cells: Option<&mut [[ArkFr; FIELD_ELEMENTS_PER_CELL]]>,
+    proofs: Option<&mut [ArkG1]>,
+    blob: &[ArkFr],
+    s: &ArkKZGSettings,
+) -> Result<(), String> {
+    kzg::eip_7594::compute_cells_and_kzg_proofs(cells, proofs, blob, s)
 }
 
-#[cfg(feature = "c_bindings")]
-kzg::c_bindings_eip7594!(ArkBackend);
+pub fn recover_cells_and_kzg_proofs_rust(
+    recovered_cells: &mut [[ArkFr; FIELD_ELEMENTS_PER_CELL]],
+    recovered_proofs: Option<&mut [ArkG1]>,
+    cell_indicies: &[usize],
+    cells: &[[ArkFr; FIELD_ELEMENTS_PER_CELL]],
+    s: &ArkKZGSettings,
+) -> Result<(), String> {
+    kzg::eip_7594::recover_cells_and_kzg_proofs(
+        recovered_cells,
+        recovered_proofs,
+        cell_indicies,
+        cells,
+        s,
+    )
+}
+
+pub fn verify_cell_kzg_proof_batch_rust(
+    commitments: &[ArkG1],
+    cell_indices: &[usize],
+    cells: &[[ArkFr; FIELD_ELEMENTS_PER_CELL]],
+    proofs: &[ArkG1],
+    s: &ArkKZGSettings,
+) -> Result<bool, String> {
+    kzg::eip_7594::verify_cell_kzg_proof_batch(commitments, cell_indices, cells, proofs, s)
+}
