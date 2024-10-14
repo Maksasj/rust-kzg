@@ -34,7 +34,7 @@ impl LFFTSettings {
         let roots = if inverse {
             &self.reverse_roots_of_unity
         } else {
-            &self.roots_of_unity
+            &self.brp_roots_of_unity
         };
 
         fft_fr_fast(output, data, 1, roots, stride);

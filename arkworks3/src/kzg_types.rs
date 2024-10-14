@@ -22,8 +22,7 @@ use ark_std::{One, Zero};
 use ark_std::UniformRand;
 
 use kzg::common_utils::reverse_bit_order;
-use kzg::eip_4844::{BYTES_PER_FIELD_ELEMENT, BYTES_PER_G1, BYTES_PER_G2};
-use kzg::eth::c_bindings::{blst_fp, blst_fp2, blst_fr, blst_p1, blst_p2};
+use kzg::eip_4844::{BYTES_PER_FIELD_ELEMENT, BYTES_PER_G1, BYTES_PER_G2, FIELD_ELEMENTS_PER_BLOB, FIELD_ELEMENTS_PER_CELL, FIELD_ELEMENTS_PER_EXT_BLOB, TRUSTED_SETUP_NUM_G2_POINTS};
 use kzg::msm::precompute::{precompute, PrecomputationTable};
 use kzg::{
     FFTFr, FFTSettings, FFTSettingsPoly, Fr as KzgFr, G1Affine as G1AffineTrait, G1Fp, G1GetFp,
@@ -841,13 +840,21 @@ impl FFTSettings<ArkFr> for LFFTSettings {
         let mut brp_roots_of_unity = roots_of_unity.clone();
         brp_roots_of_unity.pop();
         reverse_bit_order(&mut brp_roots_of_unity)?;
-
         let mut reverse_roots_of_unity = roots_of_unity.clone();
         reverse_roots_of_unity.reverse();
+
+        // let expanded_roots_of_unity = expand_root_of_unity(&root_of_unity, max_width)?;
+        // let mut reverse_roots_of_unity = expanded_roots_of_unity.clone();
+        // reverse_roots_of_unity.reverse();
+
+        // let mut roots_of_unity = expanded_roots_of_unity.clone();
+        // roots_of_unity.pop();
+        // reverse_bit_order(&mut roots_of_unity)?;
 
         Ok(LFFTSettings {
             max_width,
             root_of_unity,
+            brp_roots_of_unity,
             reverse_roots_of_unity,
             roots_of_unity,
             brp_roots_of_unity,
@@ -856,6 +863,13 @@ impl FFTSettings<ArkFr> for LFFTSettings {
 
     fn get_max_width(&self) -> usize {
         self.max_width
+    }
+
+    fn get_brp_roots_of_unity(&self) -> &[ArkFr] {
+        &self.brp_roots_of_unity
+    }
+    fn get_brp_roots_of_unity_at(&self, i: usize) -> ArkFr {
+        self.brp_roots_of_unity[i]
     }
 
     fn get_reverse_roots_of_unity_at(&self, i: usize) -> ArkFr {
@@ -914,38 +928,36 @@ impl KZGSettings<ArkFr, ArkG1, ArkG2, LFFTSettings, PolyData, ArkFp, ArkG1Affine
         g1_lagrange_brp: &[ArkG1],
         g2_monomial: &[ArkG2],
         fft_settings: &LFFTSettings,
-        cell_size: usize,
-    ) -> Result<Self, String> {
-        if g1_monomial.len() != g1_lagrange_brp.len() {
-            return Err("G1 point length mismatch".to_string());
+    ) -> Result<LKZGSettings, String> {
+        if g1_monomial.len() != FIELD_ELEMENTS_PER_BLOB
+            || g1_lagrange_brp.len() != FIELD_ELEMENTS_PER_BLOB
+            || g2_monomial.len() != TRUSTED_SETUP_NUM_G2_POINTS
+        {
+            return Err("Length does not match FIELD_ELEMENTS_PER_BLOB".to_string());
         }
 
-        let field_elements_per_blob = g1_monomial.len();
-        let field_elements_per_ext_blob = field_elements_per_blob * 2;
-
-        let n = field_elements_per_ext_blob / 2;
-        let k = n / cell_size;
+        let n = FIELD_ELEMENTS_PER_EXT_BLOB / 2;
+        let k = n / FIELD_ELEMENTS_PER_CELL;
         let k2 = 2 * k;
 
         let mut points = vec![ArkG1::default(); k2];
         let mut x = vec![ArkG1::default(); k];
-        let mut x_ext_fft_columns = vec![vec![ArkG1::default(); cell_size]; k2];
+        let mut x_ext_fft_columns = vec![vec![ArkG1::default(); FIELD_ELEMENTS_PER_CELL]; k2];
 
-        for offset in 0..cell_size {
-            let start = n - cell_size - 1 - offset;
+        for offset in 0..FIELD_ELEMENTS_PER_CELL {
+            let start = n - FIELD_ELEMENTS_PER_CELL - 1 - offset;
             for (i, p) in x.iter_mut().enumerate().take(k - 1) {
-                let j = start - i * cell_size;
+                let j = start - i * FIELD_ELEMENTS_PER_CELL;
                 *p = g1_monomial[j];
             }
             x[k - 1] = ArkG1::identity();
 
-            toeplitz_part_1(field_elements_per_ext_blob, &mut points, &x, fft_settings)?;
+            // toeplitz_part_1(&mut points, &x, fft_settings)?;
 
             for row in 0..k2 {
                 x_ext_fft_columns[row][offset] = points[row];
             }
         }
-
         Ok(Self {
             g1_values_monomial: g1_monomial.to_vec(),
             g1_values_lagrange_brp: g1_lagrange_brp.to_vec(),
@@ -1144,6 +1156,20 @@ impl KZGSettings<ArkFr, ArkG1, ArkG2, LFFTSettings, PolyData, ArkFp, ArkG1Affine
 
     fn get_fft_settings(&self) -> &LFFTSettings {
         &self.fs
+    }
+
+    fn get_g1_lagrange_brp(&self) -> &[ArkG1] {
+        &self.g1_values_lagrange_brp
+    }
+
+    fn get_g1_monomial(&self) -> &[ArkG1] {
+        &self.g1_values_monomial
+    }
+    fn get_g2_monomial(&self) -> &[ArkG2] {
+        &self.g2_values_monomial
+    }
+    fn get_x_ext_fft_column(&self, index: usize) -> &[ArkG1] {
+        &self.x_ext_fft_columns[index]
     }
 
     fn get_precomputation(&self) -> Option<&PrecomputationTable<ArkFr, ArkG1, ArkFp, ArkG1Affine>> {
