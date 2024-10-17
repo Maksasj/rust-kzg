@@ -1,6 +1,6 @@
 use crate::consts::SCALE2_ROOT_OF_UNITY;
-use crate::fft_g1::{fft_g1_fast, g1_linear_combination};
-use crate::kzg_proofs::{
+use crate::fft_g1::g1_linear_combination;
+pub use crate::kzg_proofs::{
     eval_poly, expand_root_of_unity, pairings_verify, FFTSettings as LFFTSettings,
     KZGSettings as LKZGSettings,
 };
