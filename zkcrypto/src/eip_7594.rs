@@ -1,28 +1,56 @@
+use kzg::{eip_4844::FIELD_ELEMENTS_PER_CELL};
+
+use crate::{kzg_types::{ZFr, ZG1}, kzg_proofs::KZGSettings};
+
 extern crate alloc;
 
-use kzg::EcBackend;
+// pub fn recover_cells_and_kzg_proofs_rust(
+//     recovered_cells: &mut [[FsFr; FIELD_ELEMENTS_PER_CELL]],
+//     recovered_proofs: Option<&mut [FsG1]>,
+//     cell_indicies: &[usize],
+//     cells: &[[FsFr; FIELD_ELEMENTS_PER_CELL]],
+//     s: &FsKZGSettings,
+// ) -> Result<(), String> {
+//     kzg::eip_7594::recover_cells_and_kzg_proofs(
+//         recovered_cells,
+//         recovered_proofs,
+//         cell_indicies,
+//         cells,
+//         s,
+//     )
+// }
 
-use crate::kzg_proofs::FFTSettings;
-use crate::kzg_proofs::KZGSettings;
-use crate::kzg_types::ZFp;
-use crate::kzg_types::ZFr;
-use crate::kzg_types::ZG1Affine;
-use crate::kzg_types::ZG1;
-use crate::kzg_types::ZG2;
-use crate::poly::PolyData;
-
-pub struct ZBackend;
-
-impl EcBackend for ZBackend {
-    type Fr = ZFr;
-    type G1Fp = ZFp;
-    type G1Affine = ZG1Affine;
-    type G1 = ZG1;
-    type G2 = ZG2;
-    type Poly = PolyData;
-    type FFTSettings = FFTSettings;
-    type KZGSettings = KZGSettings;
+pub fn compute_cells_and_kzg_proofs_rust(
+    cells: Option<&mut [[ZFr; FIELD_ELEMENTS_PER_CELL]]>,
+    proofs: Option<&mut [ZG1]>,
+    blob: &[ZFr],
+    s: &KZGSettings
+) -> Result<(), String> {
+    kzg::eip_7594::compute_cells_and_kzg_proofs(cells, proofs, blob, s)
 }
 
-#[cfg(feature = "c_bindings")]
-kzg::c_bindings_eip7594!(ZBackend);
+pub fn recover_cells_and_kzg_proofs_rust(
+    recovered_cells: &mut [[ZFr; FIELD_ELEMENTS_PER_CELL]],
+    recovered_proofs: Option<&mut [ZG1]>,
+    cell_indicies: &[usize],
+    cells: &[[ZFr; FIELD_ELEMENTS_PER_CELL]],
+    s: &KZGSettings,
+) -> Result<(), String> {
+    kzg::eip_7594::recover_cells_and_kzg_proofs(
+        recovered_cells,
+        recovered_proofs,
+        cell_indicies,
+        cells,
+        s,
+    )
+}
+
+pub fn verify_cell_kzg_proof_batch_rust(
+    commitments: &[ZG1],
+    cell_indices: &[usize],
+    cells: &[[ZFr; FIELD_ELEMENTS_PER_CELL]],
+    proofs: &[ZG1],
+    s: &KZGSettings,
+) -> Result<bool, String> {
+    kzg::eip_7594::verify_cell_kzg_proof_batch(commitments, cell_indices, cells, proofs, s)
+}

@@ -1,15 +1,7 @@
-use crate::{
-    kzg_proofs::FFTSettings,
-    kzg_types::{ZFp, ZFr, ZG1Affine, ZG1},
-};
+use super::P1;
+use crate::{P2, kzg_types::{ZFr, ZG1, ZG2, ZG1Affine, ZFp}, kzg_proofs::{KZGSettings, FFTSettings}};
 use bls12_381::{G1Projective, G2Projective, Scalar};
-use kzg::{
-    eip_4844::PrecomputationTableManager,
-    eth::{
-        self,
-        c_bindings::{blst_fp, blst_fp2, blst_fr, blst_p1, blst_p2, CKZGSettings},
-    },
-};
+use blst::{blst_fp, blst_fp2, blst_fr, blst_p1, blst_p2};
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Error;
@@ -26,7 +18,7 @@ pub const fn blst_fp2_into_pc_fq2(fp: &blst_fp2) -> bls12_381::Fp2 {
     bls12_381::Fp2 { c0, c1 }
 }
 
-pub const fn blst_p1_into_pc_g1projective(p1: &blst_p1) -> G1Projective {
+pub const fn blst_p1_into_pc_g1projective(p1: &P1) -> G1Projective {
     let x = bls12_381::Fp(p1.x.l);
     let y = bls12_381::Fp(p1.y.l);
     let z = bls12_381::Fp(p1.z.l);
@@ -65,33 +57,41 @@ pub const fn pc_g2projective_into_blst_p2(p2: G2Projective) -> blst_p2 {
     blst_p2 { x, y, z }
 }
 
-pub(crate) fn fft_settings_to_rust(c_settings: *const CKZGSettings) -> Result<FFTSettings, String> {
+macro_rules! handle_ckzg_badargs {
+    ($x: expr) => {
+        match $x {
+            Ok(value) => value,
+            Err(_) => return kzg::eip_4844::C_KZG_RET_BADARGS,
+        }
+    };
+}
+
+pub(crate) use handle_ckzg_badargs;
+use kzg::{eip_4844::{BYTES_PER_FIELD_ELEMENT, C_KZG_RET_BADARGS, C_KZG_RET, Blob, CKZGSettings, FIELD_ELEMENTS_PER_EXT_BLOB, PrecomputationTableManager, FIELD_ELEMENTS_PER_CELL, FIELD_ELEMENTS_PER_BLOB, TRUSTED_SETUP_NUM_G2_POINTS}, Fr};
+
+pub(crate) fn fft_settings_to_rust(
+    c_settings: *const CKZGSettings,
+) -> Result<FFTSettings, String> {
     let settings = unsafe { &*c_settings };
 
     let roots_of_unity = unsafe {
-        core::slice::from_raw_parts(
-            settings.roots_of_unity,
-            eth::FIELD_ELEMENTS_PER_EXT_BLOB + 1,
-        )
-        .iter()
-        .map(|r| ZFr::from_blst_fr(*r))
-        .collect::<Vec<ZFr>>()
+        core::slice::from_raw_parts(settings.roots_of_unity, FIELD_ELEMENTS_PER_EXT_BLOB + 1)
+            .iter()
+            .map(|r| ZFr::from_blst_fr(*r))
+            .collect::<Vec<ZFr>>()
     };
 
     let brp_roots_of_unity = unsafe {
-        core::slice::from_raw_parts(
-            settings.brp_roots_of_unity,
-            eth::FIELD_ELEMENTS_PER_EXT_BLOB,
-        )
-        .iter()
-        .map(|r| ZFr::from_blst_fr(*r))
-        .collect::<Vec<ZFr>>()
+        core::slice::from_raw_parts(settings.brp_roots_of_unity, FIELD_ELEMENTS_PER_EXT_BLOB)
+            .iter()
+            .map(|r| ZFr::from_blst_fr(*r))
+            .collect::<Vec<ZFr>>()
     };
 
     let reverse_roots_of_unity = unsafe {
         core::slice::from_raw_parts(
             settings.reverse_roots_of_unity,
-            eth::FIELD_ELEMENTS_PER_EXT_BLOB + 1,
+            FIELD_ELEMENTS_PER_EXT_BLOB + 1,
         )
         .iter()
         .map(|r| ZFr::from_blst_fr(*r))
@@ -99,7 +99,7 @@ pub(crate) fn fft_settings_to_rust(c_settings: *const CKZGSettings) -> Result<FF
     };
 
     Ok(FFTSettings {
-        max_width: eth::FIELD_ELEMENTS_PER_EXT_BLOB,
+        max_width: FIELD_ELEMENTS_PER_EXT_BLOB,
         root_of_unity: roots_of_unity[1],
         roots_of_unity,
         brp_roots_of_unity,
@@ -107,5 +107,146 @@ pub(crate) fn fft_settings_to_rust(c_settings: *const CKZGSettings) -> Result<FF
     })
 }
 
-pub(crate) static mut PRECOMPUTATION_TABLES: PrecomputationTableManager<ZFr, ZG1, ZFp, ZG1Affine> =
-    PrecomputationTableManager::new();
+pub(crate) fn kzg_settings_to_c(rust_settings: &KZGSettings) -> CKZGSettings {
+    CKZGSettings {
+        roots_of_unity: Box::leak(
+            rust_settings
+                .fs
+                .roots_of_unity
+                .iter()
+                .map(|r| ZFr::to_blst_fr(r))
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
+        )
+        .as_mut_ptr(),
+        brp_roots_of_unity: Box::leak(
+            rust_settings
+                .fs
+                .brp_roots_of_unity
+                .iter()
+                .map(|r| ZFr::to_blst_fr(r))
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
+        )
+        .as_mut_ptr(),
+        reverse_roots_of_unity: Box::leak(
+            rust_settings
+                .fs
+                .reverse_roots_of_unity
+                .iter()
+                .map(|r| ZFr::to_blst_fr(r))
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
+        )
+        .as_mut_ptr(),
+        g1_values_monomial: Box::leak(
+            rust_settings
+                .g1_values_monomial
+                .iter()
+                .map(|r| ZG1::to_blst_p1(r))
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
+        )
+        .as_mut_ptr(),
+        g1_values_lagrange_brp: Box::leak(
+            rust_settings
+                .g1_values_lagrange_brp
+                .iter()
+                .map(|r| ZG1::to_blst_p1(r))
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
+        )
+        .as_mut_ptr(),
+        g2_values_monomial: Box::leak(
+            rust_settings
+                .g2_values_monomial
+                .iter()
+                .map(|r| ZG2::to_blst_p2(r))
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
+        )
+        .as_mut_ptr(),
+        x_ext_fft_columns: Box::leak(
+            rust_settings
+                .x_ext_fft_columns
+                .iter()
+                .map(|r| {
+                    Box::leak(
+                        r.iter()
+                            .map(|it| ZG1::to_blst_p1(it))
+                            .collect::<Vec<_>>()
+                            .into_boxed_slice(),
+                    )
+                    .as_mut_ptr()
+                })
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
+        )
+        .as_mut_ptr(),
+        tables: core::ptr::null_mut(),
+        wbits: 0,
+        scratch_size: 0,
+    }
+}
+
+pub(crate) unsafe fn deserialize_blob(blob: *const Blob) -> Result<Vec<ZFr>, C_KZG_RET> {
+    (*blob)
+        .bytes
+        .chunks(BYTES_PER_FIELD_ELEMENT)
+        .map(|chunk| {
+            let mut bytes = [0u8; BYTES_PER_FIELD_ELEMENT];
+            bytes.copy_from_slice(chunk);
+            if let Ok(result) = ZFr::from_bytes(&bytes) {
+                Ok(result)
+            } else {
+                Err(C_KZG_RET_BADARGS)
+            }
+        })
+        .collect::<Result<Vec<ZFr>, C_KZG_RET>>()
+}
+
+pub(crate) static mut PRECOMPUTATION_TABLES: PrecomputationTableManager<
+    ZFr,
+    ZG1,
+    ZFp,
+    ZG1Affine
+> = PrecomputationTableManager::new();
+
+pub(crate) fn kzg_settings_to_rust(c_settings: &CKZGSettings) -> Result<KZGSettings, String> {
+    Ok(KZGSettings {
+        fs: fft_settings_to_rust(c_settings)?,
+        g1_values_monomial: unsafe {
+            core::slice::from_raw_parts(c_settings.g1_values_monomial, FIELD_ELEMENTS_PER_BLOB)
+        }
+        .iter()
+        .map(|r| ZG1::from_blst_p1(*r))
+        .collect::<Vec<_>>(),
+        g1_values_lagrange_brp: unsafe {
+            core::slice::from_raw_parts(c_settings.g1_values_lagrange_brp, FIELD_ELEMENTS_PER_BLOB)
+        }
+        .iter()
+        .map(|r| ZG1::from_blst_p1(*r))
+        .collect::<Vec<_>>(),
+        g2_values_monomial: unsafe {
+            core::slice::from_raw_parts(c_settings.g2_values_monomial, TRUSTED_SETUP_NUM_G2_POINTS)
+        }
+        .iter()
+        .map(|r| ZG2::from_blst_p2(*r))
+        .collect::<Vec<_>>(),
+        x_ext_fft_columns: unsafe {
+            core::slice::from_raw_parts(
+                c_settings.x_ext_fft_columns,
+                2 * ((FIELD_ELEMENTS_PER_EXT_BLOB / 2) / FIELD_ELEMENTS_PER_CELL),
+            )
+        }
+        .iter()
+        .map(|it| {
+            unsafe { core::slice::from_raw_parts(*it, FIELD_ELEMENTS_PER_CELL) }
+                .iter()
+                .map(|it| ZG1::from_blst_p1(*it))
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>(),
+        precomputation: unsafe { PRECOMPUTATION_TABLES.get_precomputation(c_settings) },
+    })
+}
