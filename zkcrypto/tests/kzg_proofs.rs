@@ -11,7 +11,7 @@ mod tests {
     fn proof_single_() {
         proof_single::<ZBackend>(&generate_trusted_setup);
     }
-    
+
     #[ignore = "KZG settings loading doesn't support trusted setup sizes other than FIELD_ELEMENTS_PER_BLOB (4096 points)"]
     #[test]
     fn commit_to_nil_poly_() {

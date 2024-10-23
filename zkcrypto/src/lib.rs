@@ -12,4 +12,3 @@ pub mod poly;
 pub mod recover;
 pub mod utils;
 pub mod zero_poly;
-pub mod eip_7594;
