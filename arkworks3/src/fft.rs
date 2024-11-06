@@ -2,8 +2,14 @@ use crate::kzg_proofs::LFFTSettings;
 use crate::kzg_types::ArkFr as BlstFr;
 use kzg::{FFTFr, Fr as FFr};
 
-impl FFTFr<BlstFr> for LFFTSettings {
-    fn fft_fr(&self, data: &[BlstFr], inverse: bool) -> Result<Vec<BlstFr>, String> {
+impl LFFTSettings {
+    /// Fast Fourier Transform for finite field elements, `output` must be zeroes
+    pub(crate) fn fft_fr_output(
+        &self,
+        data: &[BlstFr],
+        inverse: bool,
+        output: &mut [BlstFr],
+    ) -> Result<(), String> {
         if data.len() > self.max_width {
             return Err(String::from(
                 "Supplied list is longer than the available max width",
@@ -28,7 +34,7 @@ impl FFTFr<BlstFr> for LFFTSettings {
         let roots = if inverse {
             &self.reverse_roots_of_unity
         } else {
-            &self.brp_roots_of_unity
+            &self.roots_of_unity
         };
 
         fft_fr_fast(output, data, 1, roots, stride);
