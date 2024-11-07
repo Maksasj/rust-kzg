@@ -44,6 +44,8 @@ use kzg::eip_4844::{
     FIELD_ELEMENTS_PER_CELL, FIELD_ELEMENTS_PER_EXT_BLOB, TRUSTED_SETUP_NUM_G2_POINTS,
 };
 
+use crate::eip_4844::fft_settings_to_rust;
+
 extern crate alloc;
 use alloc::sync::Arc;
 
