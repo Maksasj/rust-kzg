@@ -52,13 +52,12 @@ pub struct KZGSettings {
     pub g2_values_monomial: Vec<ArkG2>,
     pub precomputation: Option<Arc<PrecomputationTable<ArkFr, ArkG1, ArkFp, ArkG1Affine>>>,
     pub x_ext_fft_columns: Vec<Vec<ArkG1>>,
-    pub cell_size: usize,
 }
 
 pub fn generate_trusted_setup(
     len: usize,
     secret: [u8; 32usize],
-) -> (Vec<ArkG1>, Vec<ArkG1>, Vec<ArkG2>) {
+) -> (Vec<ArkG1>, Vec<ArkG1>, Vec<Arkg2>) {
     let s = hash_to_bls_field::<ArkFr>(&secret);
     let mut s_pow = ArkFr::one();
 
