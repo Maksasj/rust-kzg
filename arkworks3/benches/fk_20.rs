@@ -2,7 +2,9 @@ use criterion::{criterion_group, criterion_main, Criterion};
 use kzg_bench::benches::fk20::{bench_fk_multi_da, bench_fk_single_da};
 use rust_kzg_arkworks3::eip_7594::ArkBackend;
 use rust_kzg_arkworks3::fk20_proofs::{KzgFK20MultiSettings, KzgFK20SingleSettings};
-use rust_kzg_arkworks3::kzg_proofs::generate_trusted_setup;
+use rust_kzg_arkworks3::kzg_proofs::{generate_trusted_setup, LFFTSettings as FFTSettings, LKZGSettings as KZGSettings};
+use rust_kzg_arkworks3::kzg_types::{ArkFp, ArkFr, ArkG1, ArkG1Affine, ArkG2};
+use rust_kzg_arkworks3::utils::PolyData;
 
 fn bench_fk_single_da_(c: &mut Criterion) {
     bench_fk_single_da::<ArkBackend, KzgFK20SingleSettings>(c, &generate_trusted_setup)

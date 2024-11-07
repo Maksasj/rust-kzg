@@ -3,8 +3,9 @@ mod tests {
     use kzg_bench::tests::kzg_proofs::{
         commit_to_nil_poly, commit_to_too_long_poly_returns_err, proof_multi, proof_single,
     };
-    use rust_kzg_arkworks3::eip_7594::ArkBackend;
-    use rust_kzg_arkworks3::kzg_proofs::generate_trusted_setup;
+    use rust_kzg_arkworks3::kzg_proofs::{generate_trusted_setup, LFFTSettings as FFTSettings, LKZGSettings as KZGSettings};
+    use rust_kzg_arkworks3::kzg_types::{ArkFp, ArkFr, ArkG1, ArkG1Affine, ArkG2};
+    use rust_kzg_arkworks3::utils::PolyData;
 
     #[ignore = "KZG settings loading doesn't support trusted setup sizes other than FIELD_ELEMENTS_PER_BLOB (4096 points)"]
     #[test]
