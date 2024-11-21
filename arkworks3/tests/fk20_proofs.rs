@@ -4,7 +4,9 @@ mod tests {
 
     use rust_kzg_arkworks3::eip_7594::ArkBackend;
     use rust_kzg_arkworks3::fk20_proofs::{KzgFK20MultiSettings, KzgFK20SingleSettings};
-    use rust_kzg_arkworks3::kzg_proofs::{generate_trusted_setup, LFFTSettings as FFTSettings, LKZGSettings as KZGSettings};
+    use rust_kzg_arkworks3::kzg_proofs::{
+        generate_trusted_setup, LFFTSettings as FFTSettings, LKZGSettings as KZGSettings,
+    };
     use rust_kzg_arkworks3::kzg_types::{ArkFp, ArkFr as BlstFr, ArkG1Affine};
     use rust_kzg_arkworks3::kzg_types::{ArkG1, ArkG2};
     use rust_kzg_arkworks3::utils::PolyData;
