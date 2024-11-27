@@ -3,7 +3,7 @@ use core::fmt::Debug;
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
-use alloc::{
+use crate::alloc::{
     string::{String, ToString},
     vec,
     vec::Vec,
@@ -15,8 +15,9 @@ use crate::{
         blob_to_polynomial, compute_powers, hash, hash_to_bls_field, BYTES_PER_COMMITMENT,
         BYTES_PER_FIELD_ELEMENT, BYTES_PER_PROOF,
     },
-    eth, FFTFr, FFTSettings, Fr, G1Affine, G1Fp, G1LinComb, KZGSettings, PairingVerify, Poly,
-    FFTG1, G1, G2,
+    eth::CELLS_PER_EXT_BLOB,
+    FFTFr, FFTSettings, Fr, G1Affine, G1Fp, G1LinComb, KZGSettings, PairingVerify, Poly, FFTG1, G1,
+    G2,
 };
 
 pub const RANDOM_CHALLENGE_KZG_CELL_BATCH_DOMAIN: [u8; 16] = *b"RCKZGCBATCH__V1_";
@@ -66,6 +67,12 @@ pub trait EcBackend {
         Self::G1Fp,
         Self::G1Affine,
     >;
+}
+
+pub trait Preset {
+    const FIELD_ELEMENTS_PER_BLOB: usize;
+    const FIELD_ELEMENTS_PER_EXT_BLOB: usize;
+    const CELLS_PER_EXT_BLOB: usize;
 }
 
 fn deduplicate_commitments<TG1: PartialEq + Clone>(
@@ -119,40 +126,36 @@ const CELL_INDICES_RBL: [usize; 128] = [
     0x07, 0x47, 0x27, 0x67, 0x17, 0x57, 0x37, 0x77, 0x0f, 0x4f, 0x2f, 0x6f, 0x1f, 0x5f, 0x3f, 0x7f,
 ];
 
-pub trait DAS<B: EcBackend> {
+pub trait DAS<B: EcBackend, const FIELD_ELEMENTS_PER_CELL: usize, P: Preset> {
     fn kzg_settings(&self) -> &B::KZGSettings;
 
     fn recover_cells_and_kzg_proofs(
         &self,
-        recovered_cells: &mut [B::Fr],
+        recovered_cells: &mut [[B::Fr; FIELD_ELEMENTS_PER_CELL]],
         recovered_proofs: Option<&mut [B::G1]>,
         cell_indices: &[usize],
-        cells: &[B::Fr],
+        cells: &[[B::Fr; FIELD_ELEMENTS_PER_CELL]],
     ) -> Result<(), String> {
-        let kzg_settings = self.kzg_settings();
-        let ts_len = kzg_settings.get_g1_monomial().len();
-        let cell_size = kzg_settings.get_cell_size();
-
-        if recovered_cells.len() != 2 * ts_len
+        if recovered_cells.len() != P::CELLS_PER_EXT_BLOB
             || recovered_proofs
                 .as_ref()
-                .is_some_and(|it| it.len() != (2 * ts_len) / cell_size)
+                .is_some_and(|it| it.len() != P::CELLS_PER_EXT_BLOB)
         {
             return Err("Invalid output array length".to_string());
         }
 
-        if cells.len() / cell_size != cell_indices.len() {
+        if cells.len() != cell_indices.len() {
             return Err(
                 "Cell indicies mismatch - cells length must be equal to cell indicies length"
                     .to_string(),
             );
         }
 
-        if cells.len() > 2 * ts_len {
+        if cells.len() > P::CELLS_PER_EXT_BLOB {
             return Err("Cell length cannot be larger than CELLS_PER_EXT_BLOB".to_string());
         }
 
-        if cells.len() < ts_len {
+        if cells.len() < P::CELLS_PER_EXT_BLOB / 2 {
             return Err(
                 "Impossible to recover - cells length cannot be less than CELLS_PER_EXT_BLOB / 2"
                     .to_string(),
@@ -160,36 +163,38 @@ pub trait DAS<B: EcBackend> {
         }
 
         for cell_index in cell_indices {
-            if *cell_index >= (2 * ts_len) / cell_size {
+            if *cell_index >= P::CELLS_PER_EXT_BLOB {
                 return Err("Cell index cannot be larger than CELLS_PER_EXT_BLOB".to_string());
             }
         }
 
-        for fr in recovered_cells.iter_mut() {
-            *fr = B::Fr::null();
-        }
-
-        for i in 0..cell_indices.len() {
-            let index = cell_indices[i];
-
-            for j in 0..cell_size {
-                let elem_index = index * cell_size + j;
-                if !recovered_cells[elem_index].is_null() {
-                    return Err("Invalid output cell".to_string());
-                }
-                recovered_cells[elem_index] = cells[i * cell_size + j].clone();
+        for cell in recovered_cells.iter_mut() {
+            for fr in cell {
+                *fr = B::Fr::null();
             }
         }
 
-        let fft_settings = kzg_settings.get_fft_settings();
+        for i in 0..cells.len() {
+            let index = cell_indices[i];
 
-        if cells.len() != 2 * ts_len {
-            recover_cells::<B>(
-                cell_size,
-                recovered_cells,
+            if recovered_cells[index]
+                .as_ref()
+                .iter()
+                .any(|cell| !cell.is_null())
+            {
+                return Err("Invalid output cell".to_string());
+            }
+
+            recovered_cells[index] = cells[i].clone();
+        }
+
+        let fft_settings = self.kzg_settings().get_fft_settings();
+
+        if cells.len() != P::CELLS_PER_EXT_BLOB {
+            recover_cells::<FIELD_ELEMENTS_PER_CELL, B, P>(
+                recovered_cells.as_flattened_mut(),
                 cell_indices,
                 fft_settings,
-                2 * ts_len,
             )?;
         }
 
@@ -197,14 +202,13 @@ pub trait DAS<B: EcBackend> {
         let recovered_cells = &recovered_cells[..];
 
         if let Some(recovered_proofs) = recovered_proofs {
-            let mut poly = vec![B::Fr::default(); ts_len * 2];
-            poly.clone_from_slice(recovered_cells);
+            let mut poly = vec![B::Fr::default(); P::FIELD_ELEMENTS_PER_EXT_BLOB];
+            poly.clone_from_slice(recovered_cells.as_flattened());
             poly_lagrange_to_monomial::<B>(&mut poly, fft_settings)?;
 
-            let res = compute_fk20_proofs::<B>(
-                cell_size,
+            let res = compute_fk20_proofs::<FIELD_ELEMENTS_PER_CELL, B>(
                 &poly,
-                ts_len,
+                P::FIELD_ELEMENTS_PER_BLOB,
                 fft_settings,
                 self.kzg_settings(),
             )?;
@@ -218,7 +222,7 @@ pub trait DAS<B: EcBackend> {
 
     fn compute_cells_and_kzg_proofs(
         &self,
-        cells: Option<&mut [B::Fr]>,
+        cells: Option<&mut [[B::Fr; FIELD_ELEMENTS_PER_CELL]]>,
         proofs: Option<&mut [B::G1]>,
         blob: &[B::Fr],
     ) -> Result<(), String> {
@@ -226,33 +230,33 @@ pub trait DAS<B: EcBackend> {
             return Err("Both cells & proofs cannot be none".to_string());
         }
 
-        let settings = self.kzg_settings();
-        let ts_size = settings.get_g1_monomial().len();
-        let cell_size = settings.get_cell_size();
-
         let poly = blob_to_polynomial::<B::Fr, B::Poly>(blob)?;
 
-        let mut poly_monomial = vec![B::Fr::zero(); 2 * ts_size];
-        poly_monomial[0..ts_size].clone_from_slice(poly.get_coeffs());
+        let mut poly_monomial = vec![B::Fr::zero(); P::FIELD_ELEMENTS_PER_EXT_BLOB];
+        poly_monomial[0..P::FIELD_ELEMENTS_PER_BLOB].clone_from_slice(poly.get_coeffs());
 
         let fft_settings = self.kzg_settings().get_fft_settings();
-        poly_lagrange_to_monomial::<B>(&mut poly_monomial[..ts_size], fft_settings)?;
+        poly_lagrange_to_monomial::<B>(
+            &mut poly_monomial[..P::FIELD_ELEMENTS_PER_BLOB],
+            fft_settings,
+        )?;
 
         // compute cells
         if let Some(cells) = cells {
-            cells.clone_from_slice(&fft_settings.fft_fr(&poly_monomial, false)?);
+            cells
+                .as_flattened_mut()
+                .clone_from_slice(&fft_settings.fft_fr(&poly_monomial, false)?);
 
-            reverse_bit_order(cells)?;
+            reverse_bit_order(cells.as_flattened_mut())?;
         };
 
         // compute proofs
         if let Some(proofs) = proofs {
-            let result = compute_fk20_proofs::<B>(
-                cell_size,
+            let result = compute_fk20_proofs::<FIELD_ELEMENTS_PER_CELL, B>(
                 &poly_monomial,
-                ts_size,
+                P::FIELD_ELEMENTS_PER_BLOB,
                 fft_settings,
-                settings,
+                self.kzg_settings(),
             )?;
             proofs.clone_from_slice(&result);
             reverse_bit_order(proofs)?;
@@ -265,23 +269,18 @@ pub trait DAS<B: EcBackend> {
         &self,
         commitments: &[B::G1],
         cell_indices: &[usize],
-        cells: &[B::Fr],
+        cells: &[[B::Fr; FIELD_ELEMENTS_PER_CELL]],
         proofs: &[B::G1],
     ) -> Result<bool, String> {
-        let settings = self.kzg_settings();
-        let cell_size = settings.get_cell_size();
-        let cell_count = cells.len() / cell_size;
-        let ts_size = settings.get_g1_monomial().len();
-
-        if cells.len() != cell_indices.len() * cell_size {
+        if cells.len() != cell_indices.len() {
             return Err("Cell count mismatch".to_string());
         }
 
-        if commitments.len() != cell_count {
+        if commitments.len() != cells.len() {
             return Err("Commitment count mismatch".to_string());
         }
 
-        if proofs.len() != cell_count {
+        if proofs.len() != cells.len() {
             return Err("Proof count mismatch".to_string());
         }
 
@@ -289,7 +288,7 @@ pub trait DAS<B: EcBackend> {
             return Ok(true);
         }
 
-        if cfg_iter!(cell_indices).any(|&cell_index| cell_index >= (2 * ts_size) / cell_size) {
+        if cfg_iter!(cell_indices).any(|&cell_index| cell_index >= CELLS_PER_EXT_BLOB) {
             return Err("Invalid cell index".to_string());
         }
 
@@ -299,7 +298,7 @@ pub trait DAS<B: EcBackend> {
 
         let mut new_count = commitments.len();
         let mut unique_commitments = commitments.to_vec();
-        let mut commitment_indices = vec![0usize; cell_count];
+        let mut commitment_indices = vec![0usize; cells.len()];
         deduplicate_commitments(
             &mut unique_commitments,
             &mut commitment_indices,
@@ -310,20 +309,20 @@ pub trait DAS<B: EcBackend> {
             return Err("Commitment is not valid".to_string());
         }
 
-        let fft_settings = settings.get_fft_settings();
+        let fft_settings = self.kzg_settings().get_fft_settings();
 
         let unique_commitments = &unique_commitments[0..new_count];
 
-        let r_powers = compute_r_powers_for_verify_cell_kzg_proof_batch::<B>(
-            cell_size,
-            unique_commitments,
-            &commitment_indices,
-            cell_indices,
-            cells,
-            proofs,
-        )?;
+        let r_powers =
+            compute_r_powers_for_verify_cell_kzg_proof_batch::<FIELD_ELEMENTS_PER_CELL, B>(
+                unique_commitments,
+                &commitment_indices,
+                cell_indices,
+                cells,
+                proofs,
+            )?;
 
-        let proof_lincomb = B::G1::g1_lincomb(proofs, &r_powers, cell_count, None);
+        let proof_lincomb = B::G1::g1_lincomb(proofs, &r_powers, cells.len(), None);
 
         let final_g1_sum = compute_weighted_sum_of_commitments::<B>(
             unique_commitments,
@@ -331,29 +330,26 @@ pub trait DAS<B: EcBackend> {
             &r_powers,
         );
 
-        let interpolation_poly_commit = compute_commitment_to_aggregated_interpolation_poly::<B>(
-            cell_size,
-            &r_powers,
-            cell_indices,
-            cells,
-            fft_settings,
-            settings.get_g1_monomial(),
-        )?;
+        let interpolation_poly_commit =
+            compute_commitment_to_aggregated_interpolation_poly::<FIELD_ELEMENTS_PER_CELL, B, P>(
+                &r_powers,
+                cell_indices,
+                cells,
+                fft_settings,
+                self.kzg_settings().get_g1_monomial(),
+            )?;
 
         let final_g1_sum = final_g1_sum.sub(&interpolation_poly_commit);
 
-        let weighted_sum_of_proofs = computed_weighted_sum_of_proofs::<B>(
-            cell_size,
-            proofs,
-            &r_powers,
-            cell_indices,
-            fft_settings,
-            ts_size * 2,
-        )?;
+        let weighted_sum_of_proofs = computed_weighted_sum_of_proofs::<
+            FIELD_ELEMENTS_PER_CELL,
+            B,
+            P,
+        >(proofs, &r_powers, cell_indices, fft_settings)?;
 
         let final_g1_sum = final_g1_sum.add(&weighted_sum_of_proofs);
 
-        let power_of_s = &settings.get_g2_monomial()[cell_size];
+        let power_of_s = &self.kzg_settings().get_g2_monomial()[FIELD_ELEMENTS_PER_CELL];
 
         Ok(B::G1::verify(
             &final_g1_sum,
@@ -428,19 +424,19 @@ fn compute_vanishing_polynomial_from_roots<B: EcBackend>(
     Ok(poly)
 }
 
-fn vanishing_polynomial_for_missing_cells<B: EcBackend>(
-    cell_size: usize,
+fn vanishing_polynomial_for_missing_cells<
+    const FIELD_ELEMENTS_PER_CELL: usize,
+    B: EcBackend,
+    P: Preset,
+>(
     missing_cell_indicies: &[usize],
     fft_settings: &B::FFTSettings,
-    field_elements_per_ext_blob: usize,
 ) -> Result<Vec<B::Fr>, String> {
-    let cells_per_ext_blob = field_elements_per_ext_blob / cell_size;
-
-    if missing_cell_indicies.is_empty() || missing_cell_indicies.len() >= cells_per_ext_blob {
+    if missing_cell_indicies.is_empty() || missing_cell_indicies.len() >= P::CELLS_PER_EXT_BLOB {
         return Err("Invalid missing cell indicies count".to_string());
     }
 
-    let stride = field_elements_per_ext_blob / cells_per_ext_blob;
+    let stride = P::FIELD_ELEMENTS_PER_EXT_BLOB / P::CELLS_PER_EXT_BLOB;
 
     let roots = missing_cell_indicies
         .iter()
@@ -449,52 +445,48 @@ fn vanishing_polynomial_for_missing_cells<B: EcBackend>(
 
     let short_vanishing_poly = compute_vanishing_polynomial_from_roots::<B>(&roots)?;
 
-    let mut vanishing_poly = vec![B::Fr::zero(); field_elements_per_ext_blob];
+    let mut vanishing_poly = vec![B::Fr::zero(); P::FIELD_ELEMENTS_PER_EXT_BLOB];
 
     for (i, coeff) in short_vanishing_poly.into_iter().enumerate() {
-        vanishing_poly[i * cell_size] = coeff
+        vanishing_poly[i * FIELD_ELEMENTS_PER_CELL] = coeff
     }
 
     Ok(vanishing_poly)
 }
 
-fn recover_cells<B: EcBackend>(
-    cell_size: usize,
+fn recover_cells<const FIELD_ELEMENTS_PER_CELL: usize, B: EcBackend, P: Preset>(
     output: &mut [B::Fr],
     cell_indicies: &[usize],
     fft_settings: &B::FFTSettings,
-    field_elements_per_ext_blob: usize,
 ) -> Result<(), String> {
-    let cells_per_ext_blob = field_elements_per_ext_blob / cell_size;
     let mut missing_cell_indicies = Vec::new();
 
     let mut cells_brp = output.to_vec();
     reverse_bit_order(&mut cells_brp)?;
 
-    for i in 0..cells_per_ext_blob {
+    for i in 0..P::CELLS_PER_EXT_BLOB {
         if !cell_indicies.contains(&i) {
-            missing_cell_indicies.push(reverse_bits_limited(cells_per_ext_blob, i));
+            missing_cell_indicies.push(reverse_bits_limited(P::CELLS_PER_EXT_BLOB, i));
         }
     }
 
     let missing_cell_indicies = &missing_cell_indicies[..];
 
-    if missing_cell_indicies.len() > cells_per_ext_blob / 2 {
+    if missing_cell_indicies.len() > P::CELLS_PER_EXT_BLOB / 2 {
         return Err("Not enough cells".to_string());
     }
 
-    let vanishing_poly_coeff = vanishing_polynomial_for_missing_cells::<B>(
-        cell_size,
-        missing_cell_indicies,
-        fft_settings,
-        field_elements_per_ext_blob,
-    )?;
+    let vanishing_poly_coeff = vanishing_polynomial_for_missing_cells::<
+        FIELD_ELEMENTS_PER_CELL,
+        B,
+        P,
+    >(missing_cell_indicies, fft_settings)?;
 
     let vanishing_poly_eval = fft_settings.fft_fr(&vanishing_poly_coeff, false)?;
 
-    let mut extended_evaluation_times_zero = Vec::with_capacity(field_elements_per_ext_blob);
+    let mut extended_evaluation_times_zero = Vec::with_capacity(P::FIELD_ELEMENTS_PER_EXT_BLOB);
 
-    for i in 0..field_elements_per_ext_blob {
+    for i in 0..P::FIELD_ELEMENTS_PER_EXT_BLOB {
         if cells_brp[i].is_null() {
             extended_evaluation_times_zero.push(B::Fr::zero());
         } else {
@@ -509,7 +501,7 @@ fn recover_cells<B: EcBackend>(
 
     let vanishing_poly_over_coset = coset_fft::<B>(vanishing_poly_coeff, fft_settings)?;
 
-    for i in 0..field_elements_per_ext_blob {
+    for i in 0..P::FIELD_ELEMENTS_PER_EXT_BLOB {
         extended_evaluations_over_coset[i] =
             extended_evaluations_over_coset[i].div(&vanishing_poly_over_coset[i])?;
     }
@@ -573,14 +565,13 @@ fn toeplitz_coeffs_stride<B: EcBackend>(
     Ok(())
 }
 
-fn compute_fk20_proofs<B: EcBackend>(
-    cell_size: usize,
+fn compute_fk20_proofs<const FIELD_ELEMENTS_PER_CELL: usize, B: EcBackend>(
     poly: &[B::Fr],
     n: usize,
     fft_settings: &B::FFTSettings,
     kzg_settings: &B::KZGSettings,
 ) -> Result<Vec<B::G1>, String> {
-    let k = n / cell_size;
+    let k = n / FIELD_ELEMENTS_PER_CELL;
     let k2 = k * 2;
 
     let mut coeffs = vec![vec![B::Fr::default(); k]; k2];
@@ -588,8 +579,8 @@ fn compute_fk20_proofs<B: EcBackend>(
     let mut toeplitz_coeffs = vec![B::Fr::default(); k2];
     let mut toeplitz_coeffs_fft = vec![B::Fr::default(); k2];
 
-    for i in 0..cell_size {
-        toeplitz_coeffs_stride::<B>(&mut toeplitz_coeffs, poly, n, i, cell_size)?;
+    for i in 0..FIELD_ELEMENTS_PER_CELL {
+        toeplitz_coeffs_stride::<B>(&mut toeplitz_coeffs, poly, n, i, FIELD_ELEMENTS_PER_CELL)?;
         toeplitz_coeffs_fft.clone_from_slice(&fft_settings.fft_fr(&toeplitz_coeffs, false)?);
         for j in 0..k2 {
             coeffs[j][i] = toeplitz_coeffs_fft[j].clone();
@@ -600,7 +591,7 @@ fn compute_fk20_proofs<B: EcBackend>(
         h_ext_fft[i] = B::G1::g1_lincomb(
             kzg_settings.get_x_ext_fft_column(i),
             &coeffs[i],
-            cell_size,
+            FIELD_ELEMENTS_PER_CELL,
             None,
         );
     }
@@ -615,67 +606,81 @@ fn compute_fk20_proofs<B: EcBackend>(
     fft_settings.fft_g1(&h, false)
 }
 
-fn compute_r_powers_for_verify_cell_kzg_proof_batch<B: EcBackend>(
-    cell_size: usize,
+fn compute_r_powers_for_verify_cell_kzg_proof_batch<
+    const FIELD_ELEMENTS_PER_CELL: usize,
+    B: EcBackend,
+>(
     commitments: &[B::G1],
     commitment_indices: &[usize],
     cell_indices: &[usize],
-    cells: &[B::Fr],
+    cells: &[[B::Fr; FIELD_ELEMENTS_PER_CELL]],
     proofs: &[B::G1],
 ) -> Result<Vec<B::Fr>, String> {
-    debug_assert!(cells.len() % cell_size == 0);
-
-    let cell_count = cells.len() / cell_size;
-
-    if commitment_indices.len() != cell_count
-        || cell_indices.len() != cell_count
-        || proofs.len() != cell_count
+    if commitment_indices.len() != cells.len()
+        || cell_indices.len() != cells.len()
+        || proofs.len() != cells.len()
     {
         return Err("Cell count mismatch".to_string());
     }
 
-    let input_size = RANDOM_CHALLENGE_KZG_CELL_BATCH_DOMAIN.len() /* the domain separator */
-        + size_of::<u64>()                                               /* cell_size */
-        + size_of::<u64>()                                               /* commitment count */
-        + size_of::<u64>()                                               /* cell count */
-        + (commitments.len() * BYTES_PER_COMMITMENT)                     /* commitment bytes */
-        + (cell_count * size_of::<u64>())                                /* commitment_indices */
-        + (cell_count * size_of::<u64>())                                /* cell_indices */
-        + (cells.len() * BYTES_PER_FIELD_ELEMENT)                        /* cells */
-        + (cell_count * BYTES_PER_PROOF)                                 /* proofs bytes */
-        ;
+    // TODO: challenge generation probably also has to be in preset
 
-    let mut bytes = Vec::with_capacity(input_size);
-    bytes.extend_from_slice(&RANDOM_CHALLENGE_KZG_CELL_BATCH_DOMAIN);
-    bytes.extend_from_slice(&(cell_size as u64).to_be_bytes());
-    bytes.extend_from_slice(&(commitments.len() as u64).to_be_bytes());
-    bytes.extend_from_slice(&(cell_count as u64).to_be_bytes());
+    let input_size = RANDOM_CHALLENGE_KZG_CELL_BATCH_DOMAIN.len()
+        + size_of::<u64>()
+        + size_of::<u64>()
+        + size_of::<u64>()
+        // probably, BYTES_PER_COMMITMENT should be in backend trait - 
+        // currently impossible due to encoded commitment length in G1 trait
+        + (commitments.len() * BYTES_PER_COMMITMENT)
+        + (cells.len() * size_of::<u64>())
+        + (cells.len() * size_of::<u64>())
+        + (cells.len() * (FIELD_ELEMENTS_PER_CELL * BYTES_PER_FIELD_ELEMENT))
+        + (cells.len() * BYTES_PER_PROOF);
 
+    let mut bytes = vec![0; input_size];
+    bytes[..16].copy_from_slice(&RANDOM_CHALLENGE_KZG_CELL_BATCH_DOMAIN);
+    bytes[16..24].copy_from_slice(&(FIELD_ELEMENTS_PER_CELL as u64).to_be_bytes());
+    bytes[24..32].copy_from_slice(&(commitments.len() as u64).to_be_bytes());
+    bytes[32..40].copy_from_slice(&(cells.len() as u64).to_be_bytes());
+
+    let mut offset = 40;
     for commitment in commitments {
-        bytes.extend_from_slice(&commitment.to_bytes());
+        bytes[offset..(offset + BYTES_PER_COMMITMENT)].copy_from_slice(&commitment.to_bytes());
+        offset += BYTES_PER_COMMITMENT;
     }
 
-    for i in 0..cell_count {
-        bytes.extend_from_slice(&(commitment_indices[i] as u64).to_be_bytes());
-        bytes.extend_from_slice(&(cell_indices[i] as u64).to_be_bytes());
+    for i in 0..cells.len() {
+        bytes[offset..(offset + 8)].copy_from_slice(&(commitment_indices[i] as u64).to_be_bytes());
+        offset += 8;
 
-        for fr in &cells[(i * cell_size)..((i + 1) * cell_size)] {
-            bytes.extend_from_slice(&fr.to_bytes());
-        }
+        bytes[offset..(offset + 8)].copy_from_slice(&(cell_indices[i] as u64).to_be_bytes());
+        offset += 8;
 
-        bytes.extend_from_slice(&(proofs[i].to_bytes()));
+        bytes[offset..(offset + (FIELD_ELEMENTS_PER_CELL * BYTES_PER_FIELD_ELEMENT))]
+            .copy_from_slice(
+                &cells[i]
+                    .as_ref()
+                    .iter()
+                    .flat_map(|fr| fr.to_bytes())
+                    .collect::<Vec<_>>(),
+            );
+        offset += FIELD_ELEMENTS_PER_CELL * BYTES_PER_FIELD_ELEMENT;
+
+        bytes[offset..(offset + BYTES_PER_PROOF)].copy_from_slice(&(proofs[i].to_bytes()));
+        offset += BYTES_PER_PROOF;
     }
 
     let bytes = &bytes[..];
 
-    if bytes.len() != input_size {
+    if offset != input_size {
         return Err("Failed to create challenge - invalid length".to_string());
     }
 
+    // hash function (as well as whole algo above I guess?) should be in Preset (or backend, not clear for now)
     let eval_challenge = hash(bytes);
     let r = hash_to_bls_field(&eval_challenge);
 
-    Ok(compute_powers(&r, cell_count))
+    Ok(compute_powers(&r, cells.len()))
 }
 
 fn compute_weighted_sum_of_commitments<B: EcBackend>(
@@ -720,22 +725,15 @@ fn compute_weighted_sum_of_commitments<B: EcBackend>(
     B::G1::g1_lincomb(commitments, &commitment_weights, commitments.len(), None)
 }
 
-fn get_inv_coset_shift_for_cell<B: EcBackend>(
-    cell_size: usize,
+fn get_inv_coset_shift_for_cell<const FIELD_ELEMENTS_PER_CELL: usize, B: EcBackend, P: Preset>(
     cell_index: usize,
     fft_settings: &B::FFTSettings,
-    field_elements_per_ext_blob: usize,
 ) -> Result<B::Fr, String> {
-    let cells_per_ext_blob = field_elements_per_ext_blob / cell_size;
     /*
      * Get the cell index in reverse-bit order.
      * This index points to this cell's coset factor h_k in the roots_of_unity array.
      */
-    let cell_index_rbl = if cells_per_ext_blob == eth::CELLS_PER_EXT_BLOB {
-        CELL_INDICES_RBL[cell_index]
-    } else {
-        reverse_bits_limited(cells_per_ext_blob, cell_index)
-    };
+    let cell_index_rbl = CELL_INDICES_RBL[cell_index];
 
     /*
      * Observe that for every element in roots_of_unity, we can find its inverse by
@@ -745,68 +743,72 @@ fn get_inv_coset_shift_for_cell<B: EcBackend>(
      *   roots = {w^0, w^1, w^2, ... w^7, w^0}
      * For a root of unity in roots[i], we can find its inverse in roots[-i].
      */
-    if cell_index_rbl > field_elements_per_ext_blob {
+    if cell_index_rbl > P::FIELD_ELEMENTS_PER_EXT_BLOB {
         return Err("Invalid cell index".to_string());
     }
-    let inv_coset_factor_idx = field_elements_per_ext_blob - cell_index_rbl;
+    let inv_coset_factor_idx = P::FIELD_ELEMENTS_PER_EXT_BLOB - cell_index_rbl;
 
     /* Get h_k^{-1} using the index */
-    if inv_coset_factor_idx > field_elements_per_ext_blob {
+    if inv_coset_factor_idx > P::FIELD_ELEMENTS_PER_EXT_BLOB {
         return Err("Invalid cell index".to_string());
     }
 
     Ok(fft_settings.get_roots_of_unity_at(inv_coset_factor_idx))
 }
 
-fn compute_commitment_to_aggregated_interpolation_poly<B: EcBackend>(
-    cell_size: usize,
+fn compute_commitment_to_aggregated_interpolation_poly<
+    const FIELD_ELEMENTS_PER_CELL: usize,
+    B: EcBackend,
+    P: Preset,
+>(
     r_powers: &[B::Fr],
     cell_indices: &[usize],
-    cells: &[B::Fr],
+    cells: &[[B::Fr; FIELD_ELEMENTS_PER_CELL]],
     fft_settings: &B::FFTSettings,
     g1_monomial: &[B::G1],
 ) -> Result<B::G1, String> {
-    let cells_per_ext_blob = g1_monomial.len() * 2 / cell_size;
-
-    let mut aggregated_column_cells = vec![B::Fr::zero(); cells_per_ext_blob * cell_size];
+    let mut aggregated_column_cells =
+        vec![B::Fr::zero(); P::CELLS_PER_EXT_BLOB * FIELD_ELEMENTS_PER_CELL];
 
     for (cell_index, column_index) in cell_indices.iter().enumerate() {
-        for fr_index in 0..cell_size {
-            let original_fr = cells[cell_index * cell_size + fr_index].clone();
+        for fr_index in 0..FIELD_ELEMENTS_PER_CELL {
+            let original_fr = cells[cell_index].as_ref()[fr_index].clone();
 
             let scaled_fr = original_fr.mul(&r_powers[cell_index]);
 
-            let array_index = column_index * cell_size + fr_index;
+            let array_index = column_index * FIELD_ELEMENTS_PER_CELL + fr_index;
             aggregated_column_cells[array_index] =
                 aggregated_column_cells[array_index].add(&scaled_fr);
         }
     }
 
-    let mut is_cell_used = vec![false; cells_per_ext_blob];
+    let mut is_cell_used = vec![false; P::CELLS_PER_EXT_BLOB];
 
     for cell_index in cell_indices {
         is_cell_used[*cell_index] = true;
     }
 
-    let mut aggregated_interpolation_poly = vec![B::Fr::zero(); cell_size];
+    let mut aggregated_interpolation_poly = vec![B::Fr::zero(); FIELD_ELEMENTS_PER_CELL];
     for (i, is_cell_used) in is_cell_used.iter().enumerate() {
         if !is_cell_used {
             continue;
         }
 
-        let index = i * cell_size;
+        let index = i * FIELD_ELEMENTS_PER_CELL;
 
-        reverse_bit_order(&mut aggregated_column_cells[index..(index + cell_size)])?;
+        reverse_bit_order(&mut aggregated_column_cells[index..(index + FIELD_ELEMENTS_PER_CELL)])?;
 
-        let mut column_interpolation_poly =
-            fft_settings.fft_fr(&aggregated_column_cells[index..(index + cell_size)], true)?;
+        let mut column_interpolation_poly = fft_settings.fft_fr(
+            &aggregated_column_cells[index..(index + FIELD_ELEMENTS_PER_CELL)],
+            true,
+        )?;
 
         let inv_coset_factor =
-            get_inv_coset_shift_for_cell::<B>(cell_size, i, fft_settings, g1_monomial.len() * 2)?;
+            get_inv_coset_shift_for_cell::<FIELD_ELEMENTS_PER_CELL, B, P>(i, fft_settings)?;
 
         shift_poly::<B>(&mut column_interpolation_poly, &inv_coset_factor);
 
-        for k in 0..cell_size {
+        for k in 0..FIELD_ELEMENTS_PER_CELL {
             aggregated_interpolation_poly[k] =
                 aggregated_interpolation_poly[k].add(&column_interpolation_poly[k]);
         }
@@ -816,27 +818,20 @@ fn compute_commitment_to_aggregated_interpolation_poly<B: EcBackend>(
     Ok(B::G1::g1_lincomb(
         g1_monomial,
         &aggregated_interpolation_poly,
-        cell_size,
+        FIELD_ELEMENTS_PER_CELL,
         None,
     ))
 }
 
-fn get_coset_shift_pow_for_cell<B: EcBackend>(
-    cell_size: usize,
+fn get_coset_shift_pow_for_cell<const FIELD_ELEMENTS_PER_CELL: usize, B: EcBackend, P: Preset>(
     cell_index: usize,
     fft_settings: &B::FFTSettings,
-    field_elements_per_ext_blob: usize,
 ) -> Result<B::Fr, String> {
-    let cells_per_ext_blob = field_elements_per_ext_blob / cell_size;
     /*
      * Get the cell index in reverse-bit order.
      * This index points to this cell's coset factor h_k in the roots_of_unity array.
      */
-    let cell_idx_rbl = if cells_per_ext_blob == eth::CELLS_PER_EXT_BLOB {
-        CELL_INDICES_RBL[cell_index]
-    } else {
-        reverse_bits_limited(cells_per_ext_blob, cell_index)
-    };
+    let cell_idx_rbl = CELL_INDICES_RBL[cell_index];
 
     /*
      * Get the index to h_k^n in the roots_of_unity array.
@@ -844,9 +839,9 @@ fn get_coset_shift_pow_for_cell<B: EcBackend>(
      * Multiplying the index of h_k by n, effectively raises h_k to the n-th power,
      * because advancing in the roots_of_unity array corresponds to increasing exponents.
      */
-    let h_k_pow_idx = cell_idx_rbl * cell_size;
+    let h_k_pow_idx = cell_idx_rbl * FIELD_ELEMENTS_PER_CELL;
 
-    if h_k_pow_idx > field_elements_per_ext_blob {
+    if h_k_pow_idx > P::FIELD_ELEMENTS_PER_EXT_BLOB {
         return Err("Invalid cell index".to_string());
     }
 
@@ -854,13 +849,15 @@ fn get_coset_shift_pow_for_cell<B: EcBackend>(
     Ok(fft_settings.get_roots_of_unity_at(h_k_pow_idx))
 }
 
-fn computed_weighted_sum_of_proofs<B: EcBackend>(
-    cell_size: usize,
+fn computed_weighted_sum_of_proofs<
+    const FIELD_ELEMENTS_PER_CELL: usize,
+    B: EcBackend,
+    P: Preset,
+>(
     proofs: &[B::G1],
     r_powers: &[B::Fr],
     cell_indices: &[usize],
     fft_settings: &B::FFTSettings,
-    field_elements_per_ext_blob: usize,
 ) -> Result<B::G1, String> {
     let num_cells = proofs.len();
 
@@ -870,11 +867,9 @@ fn computed_weighted_sum_of_proofs<B: EcBackend>(
 
     let mut weighted_powers_of_r = Vec::with_capacity(num_cells);
     for i in 0..num_cells {
-        let h_k_pow = get_coset_shift_pow_for_cell::<B>(
-            cell_size,
+        let h_k_pow = get_coset_shift_pow_for_cell::<FIELD_ELEMENTS_PER_CELL, B, P>(
             cell_indices[i],
             fft_settings,
-            field_elements_per_ext_blob,
         )?;
 
         weighted_powers_of_r.push(r_powers[i].mul(&h_k_pow));
@@ -891,7 +886,9 @@ fn computed_weighted_sum_of_proofs<B: EcBackend>(
 /*
  * Automatically implement DAS for all backends
  */
-impl<B: EcBackend> DAS<B> for B::KZGSettings {
+impl<B: EcBackend, const FIELD_ELEMENTS_PER_CELL: usize, P: Preset>
+    DAS<B, FIELD_ELEMENTS_PER_CELL, P> for B::KZGSettings
+{
     fn kzg_settings(&self) -> &<B as EcBackend>::KZGSettings {
         self
     }

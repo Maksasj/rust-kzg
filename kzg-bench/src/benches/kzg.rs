@@ -1,5 +1,5 @@
 use criterion::Criterion;
-use kzg::{EcBackend, FFTSettings, Fr, KZGSettings, Poly};
+use kzg::{EcBackend, FFTSettings, Fr, KZGSettings, Poly, Preset};
 
 pub const SECRET: [u8; 32usize] = [
     0xa4, 0x73, 0x31, 0x95, 0x28, 0xc8, 0xb6, 0xea, 0x4d, 0x08, 0xcc, 0x53, 0x18, 0x00, 0x00, 0x00,
@@ -8,24 +8,23 @@ pub const SECRET: [u8; 32usize] = [
 
 const BENCH_SCALE: usize = 15;
 
+struct TestPreset;
+
+impl Preset for TestPreset {
+    const FIELD_ELEMENTS_PER_BLOB: usize = 32768;
+    const FIELD_ELEMENTS_PER_EXT_BLOB: usize = 65536;
+    const CELLS_PER_EXT_BLOB: usize = 512;
+}
+
 #[allow(clippy::type_complexity)]
-pub fn bench_commit_to_poly<
-    TFr: Fr,
-    TG1: G1 + G1Mul<TFr> + G1GetFp<TG1Fp>,
-    TG2: G2,
-    TPoly: Poly<TFr>,
-    TFFTSettings: FFTSettings<TFr>,
-    TKZGSettings: KZGSettings<TFr, TG1, TG2, TFFTSettings, TPoly, TG1Fp, TG1Affine>,
-    TG1Fp: G1Fp,
-    TG1Affine: G1Affine<TG1, TG1Fp>,
->(
+pub fn bench_commit_to_poly<B: EcBackend>(
     c: &mut Criterion,
-    generate_trusted_setup: &dyn Fn(usize, [u8; 32usize]) -> (Vec<TG1>, Vec<TG1>, Vec<TG2>),
+    generate_trusted_setup: &dyn Fn(usize, [u8; 32usize]) -> (Vec<B::G1>, Vec<B::G1>, Vec<B::G2>),
 ) {
-    let fs = TFFTSettings::new(BENCH_SCALE).unwrap();
+    let fs = B::FFTSettings::new(BENCH_SCALE).unwrap();
     let (s1, s2, s3) = generate_trusted_setup(fs.get_max_width(), SECRET);
-    let ks = TKZGSettings::new(&s1, &s2, &s3, &fs).unwrap();
-    let mut poly = TPoly::new(fs.get_max_width());
+    let ks = B::KZGSettings::new_for_preset::<64, TestPreset>(&s1, &s2, &s3, &fs).unwrap();
+    let mut poly = B::Poly::new(fs.get_max_width());
     for i in 0..fs.get_max_width() {
         poly.set_coeff_at(i, &B::Fr::rand());
     }
@@ -34,23 +33,14 @@ pub fn bench_commit_to_poly<
 }
 
 #[allow(clippy::type_complexity)]
-pub fn bench_compute_proof_single<
-    TFr: Fr,
-    TG1: G1 + G1Mul<TFr> + G1GetFp<TG1Fp>,
-    TG2: G2,
-    TPoly: Poly<TFr>,
-    TFFTSettings: FFTSettings<TFr>,
-    TKZGSettings: KZGSettings<TFr, TG1, TG2, TFFTSettings, TPoly, TG1Fp, TG1Affine>,
-    TG1Fp: G1Fp,
-    TG1Affine: G1Affine<TG1, TG1Fp>,
->(
+pub fn bench_compute_proof_single<B: EcBackend>(
     c: &mut Criterion,
-    generate_trusted_setup: &dyn Fn(usize, [u8; 32usize]) -> (Vec<TG1>, Vec<TG1>, Vec<TG2>),
+    generate_trusted_setup: &dyn Fn(usize, [u8; 32usize]) -> (Vec<B::G1>, Vec<B::G1>, Vec<B::G2>),
 ) {
-    let fs = TFFTSettings::new(BENCH_SCALE).unwrap();
+    let fs = B::FFTSettings::new(BENCH_SCALE).unwrap();
     let (s1, s2, s3) = generate_trusted_setup(fs.get_max_width(), SECRET);
-    let ks = TKZGSettings::new(&s1, &s2, &s3, &fs).unwrap();
-    let mut poly = TPoly::new(fs.get_max_width());
+    let ks = B::KZGSettings::new_for_preset::<64, TestPreset>(&s1, &s2, &s3, &fs).unwrap();
+    let mut poly = B::Poly::new(fs.get_max_width());
     for i in 0..fs.get_max_width() {
         poly.set_coeff_at(i, &B::Fr::rand());
     }

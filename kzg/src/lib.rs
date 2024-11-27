@@ -10,11 +10,10 @@ use msm::precompute::PrecomputationTable;
 pub mod common_utils;
 mod das;
 pub mod eip_4844;
-pub mod eip_7594;
-// pub mod fk20_proof;
+pub mod eth;
 pub mod msm;
 
-pub use das::{EcBackend, DAS};
+pub use das::{EcBackend, Preset, DAS};
 
 pub trait Fr: Default + Clone + PartialEq + Sync {
     fn null() -> Self;
@@ -521,6 +520,13 @@ pub trait KZGSettings<
         g2_monomial: &[Coeff3],
         fs: &Fs,
         cell_size: usize,
+    ) -> Result<Self, String>;
+
+    fn new_for_preset<const FIELD_ELEMENTS_PER_CELL: usize, P: Preset>(
+        g1_monomial: &[Coeff2],
+        g1_lagrange_brp: &[Coeff2],
+        g2_monomial: &[Coeff3],
+        fs: &Fs,
     ) -> Result<Self, String>;
 
     fn commit_to_poly(&self, p: &Polynomial) -> Result<Coeff2, String>;

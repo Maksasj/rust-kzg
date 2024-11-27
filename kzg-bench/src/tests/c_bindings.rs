@@ -117,7 +117,7 @@ pub fn load_trusted_setup_invalid_g1_byte_length_test(
         *const u8,
         u64,
         u64,
-    ) -> C_KZG_RET,
+    ) -> CKzgRet,
 ) {
     let mut file = File::open(get_trusted_setup_path()).unwrap();
     let mut contents = String::new();
@@ -167,7 +167,7 @@ pub fn load_trusted_setup_invalid_g1_point_test(
         *const u8,
         u64,
         u64,
-    ) -> C_KZG_RET,
+    ) -> CKzgRet,
 ) {
     let mut file = File::open(get_trusted_setup_path()).unwrap();
     let mut contents = String::new();
@@ -216,7 +216,7 @@ pub fn load_trusted_setup_invalid_g2_byte_length_test(
         *const u8,
         u64,
         u64,
-    ) -> C_KZG_RET,
+    ) -> CKzgRet,
 ) {
     let mut file = File::open(get_trusted_setup_path()).unwrap();
     let mut contents = String::new();
@@ -266,7 +266,7 @@ pub fn load_trusted_setup_invalid_g2_point_test(
         *const u8,
         u64,
         u64,
-    ) -> C_KZG_RET,
+    ) -> CKzgRet,
 ) {
     let mut file = File::open(get_trusted_setup_path()).unwrap();
     let mut contents = String::new();
@@ -315,7 +315,7 @@ pub fn load_trusted_setup_invalid_form_test(
         *const u8,
         u64,
         u64,
-    ) -> C_KZG_RET,
+    ) -> CKzgRet,
 ) {
     let mut file = File::open(get_trusted_setup_fixture_path("old")).unwrap();
     let mut contents = String::new();
