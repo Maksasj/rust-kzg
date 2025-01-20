@@ -1,28 +1,28 @@
 use crate::consts::SCALE2_ROOT_OF_UNITY;
 use crate::fft_g1::{fft_g1_fast, g1_linear_combination};
-pub use crate::kzg_proofs::{expand_root_of_unity, pairings_verify, LFFTSettings, LKZGSettings};
-// use crate::poly::{poly_fast_div, poly_inverse, poly_long_div, poly_mul_direct, poly_mul_fft};
+use crate::kzg_proofs::{
+    eval_poly, expand_root_of_unity, pairings_verify, FFTSettings as LFFTSettings,
+    KZGSettings as LKZGSettings,
+};
+use crate::poly::{poly_fast_div, poly_inverse, poly_long_div, poly_mul_direct, poly_mul_fft};
 use crate::recover::{scale_poly, unscale_poly};
 use crate::utils::{
     blst_fp_into_pc_fq, blst_p1_into_pc_g1projective, blst_p2_into_pc_g2projective,
     pc_g1projective_into_blst_p1, pc_g2projective_into_blst_p2, PolyData,
 };
-use crate::P2;
-use ark_bls12_381::{g1, g2, G1Affine};
-use ark_ec::{models::short_weierstrass_jacobian::GroupProjective, ProjectiveCurve};
-use ark_ec::{AffineCurve, ModelParameters};
-use ark_ff::{BigInteger, Field};
+use ark_bls12_381::{g1, g2, Fr, G1Affine};
+use ark_ec::ModelParameters;
+use ark_ec::{models::short_weierstrass_jacobian::GroupProjective, AffineCurve, ProjectiveCurve};
+use ark_ff::PrimeField;
+use ark_ff::{biginteger::BigInteger256, BigInteger, Field};
 use ark_std::{One, Zero};
-use blst::{
-    blst_bendian_from_scalar, blst_fp, blst_fp2, blst_fr, blst_fr_add, blst_fr_cneg,
-    blst_fr_eucl_inverse, blst_fr_from_scalar, blst_fr_from_uint64, blst_fr_inverse, blst_fr_mul,
-    blst_fr_sqr, blst_fr_sub, blst_p1, blst_p1_affine, blst_p1_compress, blst_p1_from_affine,
-    blst_p1_in_g1, blst_p1_uncompress, blst_p2, blst_p2_affine, blst_p2_from_affine,
-    blst_p2_uncompress, blst_scalar, blst_scalar_fr_check, blst_scalar_from_bendian,
-    blst_scalar_from_fr, blst_uint64_from_fr, BLST_ERROR,
-};
-use kzg::common_utils::{log2_u64, reverse_bit_order};
+
+#[cfg(feature = "rand")]
+use ark_std::UniformRand;
+
+use kzg::common_utils::reverse_bit_order;
 use kzg::eip_4844::{BYTES_PER_FIELD_ELEMENT, BYTES_PER_G1, BYTES_PER_G2};
+use kzg::eth::c_bindings::{blst_fp, blst_fp2, blst_fr, blst_p1, blst_p2};
 use kzg::msm::precompute::{precompute, PrecomputationTable};
 use kzg::{
     FFTFr, FFTSettings, FFTSettingsPoly, Fr as KzgFr, G1Affine as G1AffineTrait, G1Fp, G1GetFp,
@@ -63,7 +63,7 @@ impl KzgFr for ArkFr {
     }
 
     fn zero() -> Self {
-        Self::from_u64(0)
+        Self { fr: Fr::zero() }
     }
 
     fn one() -> Self {
@@ -438,7 +438,11 @@ impl G1 for ArkG1 {
                 let mut blst_point = blst::blst_p1::default();
                 unsafe { blst::blst_p1_from_affine(&mut blst_point, &blst_affine) };
 
-                Ok(ArkG1::from_blst_p1(blst_point))
+                Ok(ArkG1::from_blst_p1(blst_p1 {
+                    x: blst_fp { l: blst_point.x.l },
+                    y: blst_fp { l: blst_point.y.l },
+                    z: blst_fp { l: blst_point.z.l },
+                }))
             })
     }
 
@@ -451,7 +455,14 @@ impl G1 for ArkG1 {
         let mut out = [0u8; BYTES_PER_G1];
         let v = self.to_blst_p1();
         unsafe {
-            blst_p1_compress(out.as_mut_ptr(), &self.to_blst_p1());
+            blst::blst_p1_compress(
+                out.as_mut_ptr(),
+                &blst::blst_p1 {
+                    x: blst::blst_fp { l: v.x.l },
+                    y: blst::blst_fp { l: v.y.l },
+                    z: blst::blst_fp { l: v.z.l },
+                },
+            );
         }
         out
     }
@@ -461,12 +472,13 @@ impl G1 for ArkG1 {
     }
 
     fn is_inf(&self) -> bool {
-        let temp = &self.0;
-        temp.z.is_zero()
+        self.0.is_zero()
     }
 
     fn is_valid(&self) -> bool {
-        unsafe { blst_p1_in_g1(&self.to_blst_p1()) }
+        let affine = self.0.into_affine();
+
+        affine.is_on_curve() && affine.is_in_correct_subgroup_assuming_on_curve()
     }
 
     fn dbl(&self) -> Self {
@@ -556,18 +568,18 @@ impl PairingVerify<ArkG1, ArkG2> for ArkG1 {
 pub struct ArkG2(pub GroupProjective<g2::Parameters>);
 
 impl ArkG2 {
-    pub fn from_blst_p2(p2: blst::blst_p2) -> Self {
+    pub fn from_blst_p2(p2: blst_p2) -> Self {
         Self(blst_p2_into_pc_g2projective(&p2))
     }
 
-    pub fn to_blst_p2(&self) -> blst::blst_p2 {
+    pub fn to_blst_p2(&self) -> blst_p2 {
         pc_g2projective_into_blst_p2(self.0)
     }
 }
 
 impl G2 for ArkG2 {
     fn generator() -> Self {
-        ArkG2::from_blst_p2(P2 {
+        ArkG2::from_blst_p2(blst_p2 {
             x: blst_fp2 {
                 fp: [
                     blst_fp {
@@ -644,7 +656,7 @@ impl G2 for ArkG2 {
     }
 
     fn negative_generator() -> Self {
-        ArkG2::from_blst_p2(P2 {
+        ArkG2::from_blst_p2(blst_p2 {
             x: blst_fp2 {
                 fp: [
                     blst_fp {
@@ -732,16 +744,48 @@ impl G2 for ArkG2 {
                 )
             })
             .and_then(|bytes: &[u8; BYTES_PER_G2]| {
-                let mut tmp = blst_p2_affine::default();
-                let mut g2 = blst_p2::default();
-                unsafe {
-                    // The uncompress routine also checks that the point is on the curve
-                    if blst_p2_uncompress(&mut tmp, bytes.as_ptr()) != BLST_ERROR::BLST_SUCCESS {
-                        return Err("Failed to uncompress".to_string());
-                    }
-                    blst_p2_from_affine(&mut g2, &tmp);
+                let mut blst_affine = blst::blst_p2_affine::default();
+                let result = unsafe { blst::blst_p2_uncompress(&mut blst_affine, bytes.as_ptr()) };
+
+                if result != blst::BLST_ERROR::BLST_SUCCESS {
+                    return Err("Failed to deserialize G1".to_owned());
                 }
-                Ok(ArkG2::from_blst_p2(g2))
+
+                let mut blst_point = blst::blst_p2::default();
+                unsafe { blst::blst_p2_from_affine(&mut blst_point, &blst_affine) };
+
+                Ok(ArkG2::from_blst_p2(blst_p2 {
+                    x: blst_fp2 {
+                        fp: [
+                            blst_fp {
+                                l: blst_point.x.fp[0].l,
+                            },
+                            blst_fp {
+                                l: blst_point.x.fp[1].l,
+                            },
+                        ],
+                    },
+                    y: blst_fp2 {
+                        fp: [
+                            blst_fp {
+                                l: blst_point.y.fp[0].l,
+                            },
+                            blst_fp {
+                                l: blst_point.y.fp[1].l,
+                            },
+                        ],
+                    },
+                    z: blst_fp2 {
+                        fp: [
+                            blst_fp {
+                                l: blst_point.z.fp[0].l,
+                            },
+                            blst_fp {
+                                l: blst_point.z.fp[1].l,
+                            },
+                        ],
+                    },
+                }))
             })
     }
 
@@ -1054,21 +1098,13 @@ impl FFTSettings<ArkFr> for LFFTSettings {
         let mut brp_roots_of_unity = roots_of_unity.clone();
         brp_roots_of_unity.pop();
         reverse_bit_order(&mut brp_roots_of_unity)?;
+
         let mut reverse_roots_of_unity = roots_of_unity.clone();
         reverse_roots_of_unity.reverse();
-
-        // let expanded_roots_of_unity = expand_root_of_unity(&root_of_unity, max_width)?;
-        // let mut reverse_roots_of_unity = expanded_roots_of_unity.clone();
-        // reverse_roots_of_unity.reverse();
-
-        // let mut roots_of_unity = expanded_roots_of_unity.clone();
-        // roots_of_unity.pop();
-        // reverse_bit_order(&mut roots_of_unity)?;
 
         Ok(LFFTSettings {
             max_width,
             root_of_unity,
-            brp_roots_of_unity,
             reverse_roots_of_unity,
             roots_of_unity,
             brp_roots_of_unity,
@@ -1077,13 +1113,6 @@ impl FFTSettings<ArkFr> for LFFTSettings {
 
     fn get_max_width(&self) -> usize {
         self.max_width
-    }
-
-    fn get_brp_roots_of_unity(&self) -> &[ArkFr] {
-        &self.brp_roots_of_unity
-    }
-    fn get_brp_roots_of_unity_at(&self, i: usize) -> ArkFr {
-        self.brp_roots_of_unity[i]
     }
 
     fn get_reverse_roots_of_unity_at(&self, i: usize) -> ArkFr {
@@ -1168,7 +1197,7 @@ impl KZGSettings<ArkFr, ArkG1, ArkG2, LFFTSettings, PolyData, ArkFp, ArkG1Affine
         g2_monomial: &[ArkG2],
         fft_settings: &LFFTSettings,
         cell_size: usize,
-    ) -> Result<LKZGSettings, String> {
+    ) -> Result<Self, String> {
         if g1_monomial.len() != g1_lagrange_brp.len() {
             return Err("G1 point length mismatch".to_string());
         }
@@ -1399,22 +1428,24 @@ impl KZGSettings<ArkFr, ArkG1, ArkG2, LFFTSettings, PolyData, ArkFp, ArkG1Affine
         &self.fs
     }
 
-    fn get_g1_lagrange_brp(&self) -> &[ArkG1] {
-        &self.g1_values_lagrange_brp
+    fn get_precomputation(&self) -> Option<&PrecomputationTable<ArkFr, ArkG1, ArkFp, ArkG1Affine>> {
+        self.precomputation.as_ref().map(|v| v.as_ref())
     }
 
     fn get_g1_monomial(&self) -> &[ArkG1] {
         &self.g1_values_monomial
     }
+
+    fn get_g1_lagrange_brp(&self) -> &[ArkG1] {
+        &self.g1_values_lagrange_brp
+    }
+
     fn get_g2_monomial(&self) -> &[ArkG2] {
         &self.g2_values_monomial
     }
+
     fn get_x_ext_fft_column(&self, index: usize) -> &[ArkG1] {
         &self.x_ext_fft_columns[index]
-    }
-
-    fn get_precomputation(&self) -> Option<&PrecomputationTable<ArkFr, ArkG1, ArkFp, ArkG1Affine>> {
-        self.precomputation.as_ref().map(|v| v.as_ref())
     }
 
     fn get_cell_size(&self) -> usize {

@@ -18,7 +18,6 @@ use alloc::string::ToString;
 use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
-pub use blst::{blst_fr, blst_p1, blst_p2};
 use core::hash::Hash;
 use core::hash::Hasher;
 use sha2::{Digest, Sha256};
@@ -799,7 +798,34 @@ pub fn verify_blob_kzg_proof_batch_rust<
     }
 }
 
-#[allow(clippy::useless_conversion)]
+pub fn verify_blob_kzg_proof_batch_raw<
+    TFr: Fr + Copy + Send,
+    TG1: G1 + G1Mul<TFr> + PairingVerify<TG1, TG2> + G1GetFp<TG1Fp> + G1LinComb<TFr, TG1Fp, TG1Affine>,
+    TG2: G2,
+    TFFTSettings: FFTSettings<TFr>,
+    TPoly: Poly<TFr>,
+    TKZGSettings: KZGSettings<TFr, TG1, TG2, TFFTSettings, TPoly, TG1Fp, TG1Affine> + Sync,
+    TG1Fp: G1Fp,
+    TG1Affine: G1Affine<TG1, TG1Fp>,
+>(
+    blobs: &[[u8; BYTES_PER_BLOB]],
+    commitments_g1: &[[u8; BYTES_PER_G1]],
+    proofs_g1: &[[u8; BYTES_PER_G1]],
+    ts: &TKZGSettings,
+) -> Result<bool, String> {
+    let blobs = cfg_into_iter!(blobs)
+        .map(|bytes| bytes_to_blob(bytes))
+        .collect::<Result<Vec<_>, _>>()?;
+    let commitments_g1 = cfg_into_iter!(commitments_g1)
+        .map(|bytes| TG1::from_bytes(bytes))
+        .collect::<Result<Vec<_>, _>>()?;
+    let proofs_g1 = cfg_into_iter!(proofs_g1)
+        .map(|bytes| TG1::from_bytes(bytes))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    verify_blob_kzg_proof_batch_rust(&blobs, &commitments_g1, &proofs_g1, ts)
+}
+
 pub fn bytes_to_blob<TFr: Fr>(bytes: &[u8]) -> Result<Vec<TFr>, String> {
     if bytes.len() != BYTES_PER_BLOB {
         return Err(format!(

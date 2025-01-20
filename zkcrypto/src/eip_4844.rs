@@ -1,21 +1,25 @@
 extern crate alloc;
 
-use crate::kzg_proofs::KZGSettings;
-use crate::kzg_types::{ZFr, ZG1};
-use crate::utils::{
-    deserialize_blob, handle_ckzg_badargs, kzg_settings_to_c, PRECOMPUTATION_TABLES,
+#[cfg(feature = "c_bindings")]
+use crate::utils::PRECOMPUTATION_TABLES;
+#[cfg(feature = "c_bindings")]
+use crate::{
+    kzg_proofs::KZGSettings,
+    kzg_types::{ZFr, ZG1, ZG2},
 };
-use kzg::eip_4844::{
-    blob_to_kzg_commitment_rust, compute_blob_kzg_proof_rust, compute_kzg_proof_rust,
-    load_trusted_setup_rust, verify_blob_kzg_proof_batch_rust, verify_blob_kzg_proof_rust,
-    verify_kzg_proof_rust, BYTES_PER_G1, FIELD_ELEMENTS_PER_BLOB, TRUSTED_SETUP_NUM_G1_POINTS,
-    TRUSTED_SETUP_NUM_G2_POINTS,
+#[cfg(feature = "c_bindings")]
+use core::ptr;
+use kzg::eip_4844::load_trusted_setup_rust;
+#[cfg(feature = "c_bindings")]
+use kzg::{
+    eip_4844::{
+        BYTES_PER_G1, FIELD_ELEMENTS_PER_BLOB, TRUSTED_SETUP_NUM_G1_POINTS,
+        TRUSTED_SETUP_NUM_G2_POINTS,
+    },
+    eth,
+    eth::c_bindings::{Blob, Bytes32, Bytes48, CKZGSettings, CKzgRet, KZGCommitment, KZGProof},
+    Fr, G1,
 };
-use kzg::eth::c_bindings::{
-    Blob, Bytes32, Bytes48, CKZGSettings, CKzgRet, KZGCommitment, KZGProof,
-};
-use kzg::{cfg_into_iter, eth, Fr, G1};
-use std::ptr::{self};
 
 #[cfg(all(feature = "std", feature = "c_bindings"))]
 use libc::FILE;
@@ -26,113 +30,98 @@ use std::io::Read;
 
 #[cfg(feature = "std")]
 use kzg::eip_4844::load_trusted_setup_string;
-/// # Safety
-#[no_mangle]
-pub unsafe extern "C" fn load_trusted_setup(
-    out: *mut CKZGSettings,
-    g1_monomial_bytes: *const u8,
-    num_g1_monomial_bytes: u64,
-    g1_lagrange_bytes: *const u8,
-    num_g1_lagrange_bytes: u64,
-    g2_monomial_bytes: *const u8,
-    num_g2_monomial_bytes: u64,
-    _precompute: u64,
-) -> CKzgRet {
-    *out = CKZGSettings {
-        brp_roots_of_unity: ptr::null_mut(),
-        roots_of_unity: ptr::null_mut(),
-        reverse_roots_of_unity: ptr::null_mut(),
-        g1_values_monomial: ptr::null_mut(),
-        g1_values_lagrange_brp: ptr::null_mut(),
-        g2_values_monomial: ptr::null_mut(),
-        x_ext_fft_columns: ptr::null_mut(),
-        tables: ptr::null_mut(),
+
+#[cfg(feature = "c_bindings")]
+pub(crate) fn kzg_settings_to_c(rust_settings: &KZGSettings) -> CKZGSettings {
+    CKZGSettings {
+        roots_of_unity: Box::leak(
+            rust_settings
+                .fs
+                .roots_of_unity
+                .iter()
+                .map(ZFr::to_blst_fr)
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
+        )
+        .as_mut_ptr(),
+        brp_roots_of_unity: Box::leak(
+            rust_settings
+                .fs
+                .brp_roots_of_unity
+                .iter()
+                .map(ZFr::to_blst_fr)
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
+        )
+        .as_mut_ptr(),
+        reverse_roots_of_unity: Box::leak(
+            rust_settings
+                .fs
+                .reverse_roots_of_unity
+                .iter()
+                .map(ZFr::to_blst_fr)
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
+        )
+        .as_mut_ptr(),
+        g1_values_monomial: Box::leak(
+            rust_settings
+                .g1_values_monomial
+                .iter()
+                .map(ZG1::to_blst_p1)
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
+        )
+        .as_mut_ptr(),
+        g1_values_lagrange_brp: Box::leak(
+            rust_settings
+                .g1_values_lagrange_brp
+                .iter()
+                .map(ZG1::to_blst_p1)
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
+        )
+        .as_mut_ptr(),
+        g2_values_monomial: Box::leak(
+            rust_settings
+                .g2_values_monomial
+                .iter()
+                .map(ZG2::to_blst_p2)
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
+        )
+        .as_mut_ptr(),
+        x_ext_fft_columns: Box::leak(
+            rust_settings
+                .x_ext_fft_columns
+                .iter()
+                .map(|r| {
+                    Box::leak(
+                        r.iter()
+                            .map(ZG1::to_blst_p1)
+                            .collect::<Vec<_>>()
+                            .into_boxed_slice(),
+                    )
+                    .as_mut_ptr()
+                })
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
+        )
+        .as_mut_ptr(),
+        tables: core::ptr::null_mut(),
         wbits: 0,
         scratch_size: 0,
-    };
-
-    let g1_monomial_bytes =
-        core::slice::from_raw_parts(g1_monomial_bytes, num_g1_monomial_bytes as usize);
-    let g1_lagrange_bytes =
-        core::slice::from_raw_parts(g1_lagrange_bytes, num_g1_lagrange_bytes as usize);
-    let g2_monomial_bytes =
-        core::slice::from_raw_parts(g2_monomial_bytes, num_g2_monomial_bytes as usize);
-    TRUSTED_SETUP_NUM_G1_POINTS = num_g1_monomial_bytes as usize / BYTES_PER_G1;
-    let mut settings = handle_ckzg_badargs!(load_trusted_setup_rust(
-        g1_monomial_bytes,
-        g1_lagrange_bytes,
-        g2_monomial_bytes
-    ));
-
-    let c_settings = kzg_settings_to_c(&settings);
-
-    PRECOMPUTATION_TABLES.save_precomputation(settings.precomputation.take(), &c_settings);
-
-    *out = c_settings;
-    CKzgRet::Ok
-}
-
-/// # Safety
-#[cfg(feature = "std")]
-#[no_mangle]
-pub unsafe extern "C" fn load_trusted_setup_file(
-    out: *mut CKZGSettings,
-    in_: *mut FILE,
-) -> CKzgRet {
-    use crate::utils::{kzg_settings_to_c, PRECOMPUTATION_TABLES};
-
-    *out = CKZGSettings {
-        brp_roots_of_unity: ptr::null_mut(),
-        roots_of_unity: ptr::null_mut(),
-        reverse_roots_of_unity: ptr::null_mut(),
-        g1_values_monomial: ptr::null_mut(),
-        g1_values_lagrange_brp: ptr::null_mut(),
-        g2_values_monomial: ptr::null_mut(),
-        x_ext_fft_columns: ptr::null_mut(),
-        tables: ptr::null_mut(),
-        wbits: 0,
-        scratch_size: 0,
-    };
-
-    let mut buf = vec![0u8; 1024 * 1024];
-    let len: usize = libc::fread(buf.as_mut_ptr() as *mut libc::c_void, 1, buf.len(), in_);
-    let s = handle_ckzg_badargs!(String::from_utf8(buf[..len].to_vec()));
-    let (g1_monomial_bytes, g1_lagrange_bytes, g2_monomial_bytes) =
-        handle_ckzg_badargs!(load_trusted_setup_string(&s));
-    TRUSTED_SETUP_NUM_G1_POINTS = g1_monomial_bytes.len() / BYTES_PER_G1;
-    if TRUSTED_SETUP_NUM_G1_POINTS != FIELD_ELEMENTS_PER_BLOB {
-        // Helps pass the Java test "shouldThrowExceptionOnIncorrectTrustedSetupFromFile",
-        // as well as 5 others that pass only if this one passes (likely because Java doesn't
-        // deallocate its KZGSettings pointer when no exception is thrown).
-        return CKzgRet::BadArgs;
     }
-    let mut settings = handle_ckzg_badargs!(load_trusted_setup_rust(
-        &g1_monomial_bytes,
-        &g1_lagrange_bytes,
-        &g2_monomial_bytes
-    ));
-
-    let c_settings = kzg_settings_to_c(&settings);
-
-    PRECOMPUTATION_TABLES.save_precomputation(settings.precomputation.take(), &c_settings);
-
-    *out = c_settings;
-
-    CKzgRet::Ok
 }
 
-#[cfg(feature = "std")]
-pub fn load_trusted_setup_filename_rust(
-    filepath: &str,
-) -> Result<crate::kzg_proofs::KZGSettings, alloc::string::String> {
-    let mut file = File::open(filepath).map_err(|_| "Unable to open file".to_string())?;
-    let mut contents = String::new();
-    file.read_to_string(&mut contents)
-        .map_err(|_| "Unable to read file".to_string())?;
-
-    let (g1_monomial_bytes, g1_lagrange_bytes, g2_monomial_bytes) =
-        load_trusted_setup_string(&contents)?;
-    load_trusted_setup_rust(&g1_monomial_bytes, &g1_lagrange_bytes, &g2_monomial_bytes)
+#[cfg(feature = "c_bindings")]
+macro_rules! handle_ckzg_badargs {
+    ($x: expr) => {
+        match $x {
+            Ok(value) => value,
+            Err(_) => return kzg::eth::c_bindings::CKzgRet::BadArgs,
+        }
+    };
 }
 
 /// # Safety
@@ -253,20 +242,22 @@ pub unsafe extern "C" fn blob_to_kzg_commitment(
     blob: *const Blob,
     s: &CKZGSettings,
 ) -> CKzgRet {
+    use kzg::eip_4844::blob_to_kzg_commitment_raw;
+
     if TRUSTED_SETUP_NUM_G1_POINTS == 0 {
         // FIXME: load_trusted_setup should set this value, but if not, it fails
         TRUSTED_SETUP_NUM_G1_POINTS = FIELD_ELEMENTS_PER_BLOB
     };
 
-    let deserialized_blob = handle_ckzg_badargs!(deserialize_blob(blob));
     let settings: KZGSettings = handle_ckzg_badargs!(s.try_into());
-    let tmp = handle_ckzg_badargs!(blob_to_kzg_commitment_rust(&deserialized_blob, &settings));
+    let tmp = handle_ckzg_badargs!(blob_to_kzg_commitment_raw((*blob).bytes, &settings));
 
     (*out).bytes = tmp.to_bytes();
     CKzgRet::Ok
 }
 
 /// # Safety
+#[cfg(feature = "c_bindings")]
 #[no_mangle]
 pub unsafe extern "C" fn free_trusted_setup(s: *mut CKZGSettings) {
     if s.is_null() {
@@ -363,10 +354,7 @@ pub unsafe extern "C" fn verify_kzg_proof(
     proof_bytes: *const Bytes48,
     s: &CKZGSettings,
 ) -> CKzgRet {
-    let frz = handle_ckzg_badargs!(ZFr::from_bytes(&(*z_bytes).bytes));
-    let fry = handle_ckzg_badargs!(ZFr::from_bytes(&(*y_bytes).bytes));
-    let g1commitment = handle_ckzg_badargs!(ZG1::from_bytes(&(*commitment_bytes).bytes));
-    let g1proof = handle_ckzg_badargs!(ZG1::from_bytes(&(*proof_bytes).bytes));
+    use kzg::eip_4844::verify_kzg_proof_raw;
 
     let settings: KZGSettings = handle_ckzg_badargs!(s.try_into());
 
@@ -392,15 +380,14 @@ pub unsafe extern "C" fn verify_blob_kzg_proof(
     proof_bytes: *const Bytes48,
     s: &CKZGSettings,
 ) -> CKzgRet {
-    let deserialized_blob = handle_ckzg_badargs!(deserialize_blob(blob));
-    let commitment_g1 = handle_ckzg_badargs!(ZG1::from_bytes(&(*commitment_bytes).bytes));
-    let proof_g1 = handle_ckzg_badargs!(ZG1::from_bytes(&(*proof_bytes).bytes));
+    use kzg::eip_4844::verify_blob_kzg_proof_raw;
+
     let settings: KZGSettings = handle_ckzg_badargs!(s.try_into());
 
-    let result = handle_ckzg_badargs!(verify_blob_kzg_proof_rust(
-        &deserialized_blob,
-        &commitment_g1,
-        &proof_g1,
+    let result = handle_ckzg_badargs!(verify_blob_kzg_proof_raw(
+        (*blob).bytes,
+        (*commitment_bytes).bytes,
+        (*proof_bytes).bytes,
         &settings,
     ));
 
@@ -419,40 +406,34 @@ pub unsafe extern "C" fn verify_blob_kzg_proof_batch(
     n: usize,
     s: &CKZGSettings,
 ) -> CKzgRet {
-    let raw_blobs = core::slice::from_raw_parts(blobs, n);
-    let raw_commitments = core::slice::from_raw_parts(commitments_bytes, n);
-    let raw_proofs = core::slice::from_raw_parts(proofs_bytes, n);
+    use kzg::eip_4844::verify_blob_kzg_proof_batch_raw;
 
-    let deserialized_blobs: Result<Vec<Vec<ZFr>>, CKzgRet> = cfg_into_iter!(raw_blobs)
-        .map(|raw_blob| deserialize_blob(raw_blob).map_err(|_| CKzgRet::BadArgs))
-        .collect();
+    let blobs = core::slice::from_raw_parts(blobs, n)
+        .iter()
+        .map(|v| v.bytes)
+        .collect::<Vec<_>>();
+    let commitments = core::slice::from_raw_parts(commitments_bytes, n)
+        .iter()
+        .map(|v| v.bytes)
+        .collect::<Vec<_>>();
+    let proofs = core::slice::from_raw_parts(proofs_bytes, n)
+        .iter()
+        .map(|v| v.bytes)
+        .collect::<Vec<_>>();
 
-    let commitments_g1: Result<Vec<ZG1>, CKzgRet> = cfg_into_iter!(raw_commitments)
-        .map(|raw_commitment| ZG1::from_bytes(&raw_commitment.bytes).map_err(|_| CKzgRet::BadArgs))
-        .collect();
+    *ok = false;
 
-    let proofs_g1: Result<Vec<ZG1>, CKzgRet> = cfg_into_iter!(raw_proofs)
-        .map(|raw_proof| ZG1::from_bytes(&raw_proof.bytes).map_err(|_| CKzgRet::BadArgs))
-        .collect();
+    let settings: KZGSettings = handle_ckzg_badargs!(s.try_into());
 
-    if let (Ok(blobs), Ok(commitments), Ok(proofs)) =
-        (deserialized_blobs, commitments_g1, proofs_g1)
-    {
-        let settings: KZGSettings = handle_ckzg_badargs!(s.try_into());
+    let result = handle_ckzg_badargs!(verify_blob_kzg_proof_batch_raw(
+        &blobs,
+        &commitments,
+        &proofs,
+        &settings
+    ));
 
-        let result =
-            verify_blob_kzg_proof_batch_rust(blobs.as_slice(), &commitments, &proofs, &settings);
-
-        if let Ok(result) = result {
-            *ok = result;
-            CKzgRet::Ok
-        } else {
-            CKzgRet::BadArgs
-        }
-    } else {
-        *ok = false;
-        CKzgRet::BadArgs
-    }
+    *ok = result;
+    CKzgRet::Ok
 }
 
 /// # Safety
@@ -464,16 +445,12 @@ pub unsafe extern "C" fn compute_blob_kzg_proof(
     commitment_bytes: *const Bytes48,
     s: &CKZGSettings,
 ) -> CKzgRet {
-    let deserialized_blob = match deserialize_blob(blob) {
-        Ok(value) => value,
-        Err(err) => return err,
-    };
+    use kzg::eip_4844::compute_blob_kzg_proof_raw;
 
-    let commitment_g1 = handle_ckzg_badargs!(ZG1::from_bytes(&(*commitment_bytes).bytes));
     let settings: KZGSettings = handle_ckzg_badargs!(s.try_into());
-    let proof = handle_ckzg_badargs!(compute_blob_kzg_proof_rust(
-        &deserialized_blob,
-        &commitment_g1,
+    let proof = handle_ckzg_badargs!(compute_blob_kzg_proof_raw(
+        (*blob).bytes,
+        (*commitment_bytes).bytes,
         &settings
     ));
 
@@ -491,17 +468,15 @@ pub unsafe extern "C" fn compute_kzg_proof(
     z_bytes: *const Bytes32,
     s: &CKZGSettings,
 ) -> CKzgRet {
-    let deserialized_blob = match deserialize_blob(blob) {
-        Ok(value) => value,
-        Err(err) => return err,
-    };
-
-    let frz = handle_ckzg_badargs!(ZFr::from_bytes(&(*z_bytes).bytes));
+    use kzg::eip_4844::compute_kzg_proof_raw;
 
     let settings: KZGSettings = handle_ckzg_badargs!(s.try_into());
 
-    let (proof_out_tmp, fry_tmp) =
-        handle_ckzg_badargs!(compute_kzg_proof_rust(&deserialized_blob, &frz, &settings));
+    let (proof_out_tmp, fry_tmp) = handle_ckzg_badargs!(compute_kzg_proof_raw(
+        (*blob).bytes,
+        (*z_bytes).bytes,
+        &settings
+    ));
 
     (*proof_out).bytes = proof_out_tmp.to_bytes();
     (*y_out).bytes = fry_tmp.to_bytes();

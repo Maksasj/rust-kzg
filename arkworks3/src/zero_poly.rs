@@ -26,17 +26,37 @@ pub fn pad_poly(mut poly: Vec<BlstFr>, new_length: usize) -> Result<Vec<BlstFr>,
     Ok(poly)
 }
 
-pub fn pad_poly_coeffs<const N: usize, T>(
-    mut coeffs: SmallVec<[T; N]>,
-    new_length: usize,
-) -> Result<SmallVec<[T; N]>, String>
-where
-    T: Default + Clone,
-{
-    if new_length < coeffs.len() {
-        return Err(String::from(
-            "new_length must be longer or equal to coeffs length",
-        ));
+impl ZeroPoly<BlstFr, PolyData> for FFTSettings {
+    fn do_zero_poly_mul_partial(
+        &self,
+        indices: &[usize],
+        stride: usize,
+    ) -> Result<PolyData, String> {
+        if indices.is_empty() {
+            return Err(String::from("idx array must be non-zero"));
+        }
+        let blstpoly = PolyData {
+            coeffs: vec![BlstFr::one(); indices.len() + 1],
+        };
+        let mut poly = blst_poly_into_pc_poly(&blstpoly.coeffs);
+        poly.coeffs[0] = (self.roots_of_unity[indices[0] * stride]).fr.neg();
+
+        for (i, indice) in indices.iter().enumerate().skip(1) {
+            let neg_di = (self.roots_of_unity[indice * stride]).fr.neg();
+
+            poly.coeffs[i] = neg_di + poly.coeffs[i - 1];
+
+            let mut j = i - 1;
+            while j > 0 {
+                let temp = poly.coeffs[j] * neg_di;
+                poly.coeffs[j] = temp + poly.coeffs[j - 1];
+                j -= 1;
+            }
+
+            poly.coeffs[0] *= neg_di;
+        }
+
+        Ok(pc_poly_into_blst_poly(poly))
     }
 
     coeffs.resize(new_length, T::default());

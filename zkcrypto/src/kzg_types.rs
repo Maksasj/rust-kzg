@@ -16,7 +16,7 @@ use bls12_381::{Fp, G1Affine, G1Projective, G2Affine, G2Projective, Scalar, MODU
 use ff::Field;
 use kzg::common_utils::reverse_bit_order;
 use kzg::eip_4844::{BYTES_PER_FIELD_ELEMENT, BYTES_PER_G1, BYTES_PER_G2};
-use kzg::eth::c_bindings::CKZGSettings;
+use kzg::eth::c_bindings::{blst_fr, blst_p1, blst_p2, CKZGSettings};
 use kzg::msm::precompute::{precompute, PrecomputationTable};
 use kzg::{eth, G1Affine as G1AffineTrait};
 use kzg::{

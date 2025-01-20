@@ -73,14 +73,14 @@ impl CtG1 {
 
     pub const fn to_blst_p1(&self) -> blst_p1 {
         unsafe {
-            blst::blst_p1 {
-                x: blst::blst_fp {
+            blst_p1 {
+                x: blst_fp {
                     l: core::mem::transmute::<[usize; 6], [u64; 6]>(self.0.x.limbs),
                 },
-                y: blst::blst_fp {
+                y: blst_fp {
                     l: core::mem::transmute::<[usize; 6], [u64; 6]>(self.0.y.limbs),
                 },
-                z: blst::blst_fp {
+                z: blst_fp {
                     l: core::mem::transmute::<[usize; 6], [u64; 6]>(self.0.z.limbs),
                 },
             }

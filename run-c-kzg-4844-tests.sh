@@ -58,7 +58,6 @@ mv ../../target/release/librust_kzg_$backend.a ./lib
 
 print_msg "Applying patches and building blst"
 cd src
-# export CFLAGS="-Ofast -fno-builtin-memcpy -fPIC -Wall -Wextra -Werror"
 make blst
 unset CFLAGS
 cd ..

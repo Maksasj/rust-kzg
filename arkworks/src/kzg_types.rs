@@ -23,11 +23,10 @@ use ark_std::{One, Zero};
 
 #[cfg(feature = "rand")]
 use ark_std::UniformRand;
-use kzg::eth::c_bindings::CKZGSettings;
+use kzg::eth::c_bindings::{blst_fp, blst_fr, blst_p1, blst_p2, CKZGSettings};
 
 use crate::fft_g1::fft_g1_fast;
 
-use blst::{blst_fp, blst_fr, blst_p1};
 use kzg::common_utils::reverse_bit_order;
 use kzg::msm::precompute::{precompute, PrecomputationTable};
 use kzg::{

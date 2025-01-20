@@ -1,4 +1,4 @@
-use crate::kzg_proofs::{LFFTSettings, LKZGSettings};
+use crate::kzg_proofs::{FFTSettings, KZGSettings as LKZGSettings};
 use crate::kzg_types::{ArkFp, ArkFr as BlstFr, ArkG1, ArkG1Affine, ArkG2};
 use crate::utils::PolyData;
 use kzg::common_utils::reverse_bit_order;
@@ -29,7 +29,7 @@ impl
         BlstFr,
         ArkG1,
         ArkG2,
-        LFFTSettings,
+        FFTSettings,
         PolyData,
         LKZGSettings,
         ArkFp,
@@ -93,16 +93,8 @@ impl
 }
 
 impl
-    FK20MultiSettings<
-        BlstFr,
-        ArkG1,
-        ArkG2,
-        LFFTSettings,
-        PolyData,
-        LKZGSettings,
-        ArkFp,
-        ArkG1Affine,
-    > for KzgFK20MultiSettings
+    FK20MultiSettings<BlstFr, ArkG1, ArkG2, FFTSettings, PolyData, LKZGSettings, ArkFp, ArkG1Affine>
+    for KzgFK20MultiSettings
 {
     fn new(ks: &LKZGSettings, n2: usize, chunk_len: usize) -> Result<Self, String> {
         if n2 > ks.fs.max_width {

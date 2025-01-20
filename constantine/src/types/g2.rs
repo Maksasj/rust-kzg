@@ -68,30 +68,30 @@ impl CtG2 {
             blst_p2 {
                 x: blst_fp2 {
                     fp: [
-                        blst::blst_fp {
+                        blst_fp {
                             l: core::mem::transmute::<[usize; 6], [u64; 6]>(self.0.x.c[0].limbs),
                         },
-                        blst::blst_fp {
+                        blst_fp {
                             l: core::mem::transmute::<[usize; 6], [u64; 6]>(self.0.x.c[1].limbs),
                         },
                     ],
                 },
                 y: blst_fp2 {
                     fp: [
-                        blst::blst_fp {
+                        blst_fp {
                             l: core::mem::transmute::<[usize; 6], [u64; 6]>(self.0.y.c[0].limbs),
                         },
-                        blst::blst_fp {
+                        blst_fp {
                             l: core::mem::transmute::<[usize; 6], [u64; 6]>(self.0.y.c[1].limbs),
                         },
                     ],
                 },
                 z: blst_fp2 {
                     fp: [
-                        blst::blst_fp {
+                        blst_fp {
                             l: core::mem::transmute::<[usize; 6], [u64; 6]>(self.0.z.c[0].limbs),
                         },
-                        blst::blst_fp {
+                        blst_fp {
                             l: core::mem::transmute::<[usize; 6], [u64; 6]>(self.0.z.c[1].limbs),
                         },
                     ],
